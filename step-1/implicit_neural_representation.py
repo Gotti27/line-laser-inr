@@ -1,60 +1,10 @@
-import math
 from datetime import datetime
 
-import numpy as np
-import rff
 import torch
-import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
-
-def gear(angle):
-    return 30 + (5 * math.sin(10 * math.radians(angle)))
-
-
-def oracle(point):
-    radius, angle = convert_cartesian_to_polar((50, 50), point)
-    diff = radius - gear(angle)
-    if -2 < diff < 2:
-        return 0
-    return np.sign(diff)
-
-
-def convert_cartesian_to_polar(center, point):
-    vector = (point[0] - center[0], point[1] - center[1])
-    radius = np.linalg.norm(vector)
-    angle = math.atan2(vector[1], vector[0])
-
-    angle_degrees = math.degrees(angle)
-    if angle_degrees < 0:
-        angle_degrees += 360
-
-    return radius, angle_degrees
-
-
-def convert_polar_to_cartesian(angle, radius, center):
-    center_x, center_y = center
-    return (radius * math.cos(math.radians(angle))) + center_x, (radius * math.sin(math.radians(angle))) + center_y
-
-
-class INR(nn.Module):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        sigma = 0.5
-        # self.B = torch.tensor([[random.gauss(0, sigma), random.gauss(0, sigma)] for _ in range(64)])
-        self.encoding = rff.layers.GaussianEncoding(sigma=sigma, input_size=2, encoded_size=64)
-        self.fc1 = nn.Linear(in_features=128, out_features=64)
-        self.fc2 = nn.Linear(in_features=64, out_features=32)
-        self.out = nn.Linear(in_features=32, out_features=1)
-
-    def forward(self, x):
-        x = self.encoding(x)
-        x = nn.functional.relu(self.fc1(x))
-        x = nn.functional.relu(self.fc2(x))
-        x = nn.functional.tanh(self.out(x))
-
-        return x
-
+from inr_model import INR
+from utils import *
 
 torch.manual_seed(41)
 model = INR()
