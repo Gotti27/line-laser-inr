@@ -9,7 +9,7 @@ class INR(nn.Module):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        sigma = 0.5
+        sigma = 0.5 / 10
         # self.B = torch.tensor([[random.gauss(0, sigma), random.gauss(0, sigma)] for _ in range(64)])
         self.encoding = rff.layers.GaussianEncoding(sigma=sigma, input_size=2, encoded_size=64)
         self.fc1 = nn.Linear(in_features=128, out_features=64)
