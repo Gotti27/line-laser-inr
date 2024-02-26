@@ -45,7 +45,7 @@ timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 writer = SummaryWriter('step-1-runs/model_trainer_{}'.format(timestamp))
 epoch_number = 0
 
-EPOCHS = 50
+EPOCHS = 70
 best_vloss = 1_000_000.
 
 for epoch in range(EPOCHS):
