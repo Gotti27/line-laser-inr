@@ -10,8 +10,6 @@ def gear(angle):
 def oracle(point):
     radius, angle = convert_cartesian_to_polar((50, 50), point)
     diff = radius - gear(angle)
-    if -2 < diff < 2:
-        return 0
     return np.sign(diff)
 
 
