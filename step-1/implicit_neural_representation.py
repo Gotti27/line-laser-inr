@@ -105,16 +105,29 @@ for i in range(100):
         a, b = x.grad[0]
         value = math.sqrt(a ** 2 + b ** 2)
         gradient_sum += value
-        gradient_image[i, j] = 255 if value > 1 else value
+        gradient_image[i, j] = value  # 255 if value > 1 else value
+
+print("sum ", gradient_sum)
 
 for i in range(100):
     for j in range(100):
         gradient_image[i, j] /= gradient_sum
-        image[i, j] = gradient_image[i, j] * 255.
 
         cv.imshow("gradient", image)
         cv.waitKey(1)
 
+flattened_distribution = gradient_image.flatten()
+sampled_index = np.random.choice(np.arange(len(flattened_distribution)), size=1000, p=flattened_distribution)
+
+num_rows, num_cols, _ = gradient_image.shape
+
+sampled_row = sampled_index // num_cols
+sampled_col = sampled_index % num_cols
+
+for i in range(1000):
+    image[sampled_row[i], sampled_col[i]] = 255
+
+cv.imshow("gradient", image)
 print("done")
 cv.waitKey(0)
 cv.destroyAllWindows()
