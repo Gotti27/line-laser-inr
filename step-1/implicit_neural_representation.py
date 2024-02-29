@@ -1,5 +1,6 @@
 from datetime import datetime
 
+import cv2 as cv
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
@@ -45,10 +46,11 @@ timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 writer = SummaryWriter('step-1-runs/model_trainer_{}'.format(timestamp))
 epoch_number = 0
 
-EPOCHS = 70
+UNIFORM_TRAINING_EPOCHS = 30
+GIBBS_TRAINING_EPOCHS = 30
 best_vloss = 1_000_000.
 
-for epoch in range(EPOCHS):
+for epoch in range(UNIFORM_TRAINING_EPOCHS):
     print('EPOCH {}:'.format(epoch_number + 1))
 
     # Make sure gradient tracking is on, and do a pass over the data
@@ -90,6 +92,32 @@ for epoch in range(EPOCHS):
         torch.save(model.state_dict(), model_path)
 
     epoch_number += 1
+
+gradient_image = np.zeros((100, 100, 1), np.float32)
+image = np.zeros((100, 100, 1), np.uint8)
+
+gradient_sum = 0.
+for i in range(100):
+    for j in range(100):
+        x = torch.tensor([[i, j]], dtype=torch.float32, requires_grad=True)
+        output = model(x)
+        output.backward()
+        a, b = x.grad[0]
+        value = math.sqrt(a ** 2 + b ** 2)
+        gradient_sum += value
+        gradient_image[i, j] = 255 if value > 1 else value
+
+for i in range(100):
+    for j in range(100):
+        gradient_image[i, j] /= gradient_sum
+        image[i, j] = gradient_image[i, j] * 255.
+
+        cv.imshow("gradient", image)
+        cv.waitKey(1)
+
+print("done")
+cv.waitKey(0)
+cv.destroyAllWindows()
 
 model.train(False)
 
