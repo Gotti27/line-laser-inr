@@ -50,8 +50,8 @@ def train_one_gibbs_epoch(epoch_index, tb_writer, distr):
     for val_index in range(2000):  # 1000 batches
         sampled = np.random.choice(np.arange(len(distr)), size=128, p=distr, replace=False)
         _, cols, _ = gradient_image.shape
-        biggs_x = sampled // cols
-        biggs_y = sampled % cols
+        biggs_x = (sampled // cols) + x_offset
+        biggs_y = (sampled % cols) + y_offset
 
         inputs = [[biggs_x[index], biggs_y[index]] for index in range(128)]
 
@@ -132,10 +132,11 @@ for epoch in range(GIBBS_TRAINING_EPOCHS):
     image = np.zeros((500, 500, 1), np.uint8)
 
     gradient_sum = 0.
-    offset = uniform(0.0, 1.0)
+    x_offset = uniform(0.0, 1.0)
+    y_offset = uniform(0.0, 1.0)
     for i in range(500):
         for j in range(500):
-            x = torch.tensor([[j, i]], dtype=torch.float32, requires_grad=True)
+            x = torch.tensor([[j + x_offset, i + y_offset]], dtype=torch.float32, requires_grad=True)
             output = model(x)
             output.backward()
             a, b = x.grad[0]
