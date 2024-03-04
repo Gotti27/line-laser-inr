@@ -4,11 +4,11 @@ import numpy as np
 
 
 def gear(angle):
-    return 30 + (5 * math.sin(10 * math.radians(angle)))
+    return 100 + (10 * math.sin(20 * math.radians(angle)))
 
 
 def oracle(point):
-    radius, angle = convert_cartesian_to_polar((50, 50), point)
+    radius, angle = convert_cartesian_to_polar((250, 250), point)
     diff = radius - gear(angle)
     return diff  # np.sign(diff)
 
