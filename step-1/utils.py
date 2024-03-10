@@ -28,3 +28,9 @@ def convert_cartesian_to_polar(center, point):
 def convert_polar_to_cartesian(angle, radius, center):
     center_x, center_y = center
     return (radius * math.cos(math.radians(angle))) + center_x, (radius * math.sin(math.radians(angle))) + center_y
+
+
+def fall_to_nearest_ray(point, center, ray_number):
+    radius, angle = convert_cartesian_to_polar(center, point)
+    angle = round(angle / ray_number) * ray_number
+    return convert_polar_to_cartesian(angle, radius, center)
