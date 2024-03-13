@@ -8,6 +8,10 @@ from torch.utils.tensorboard import SummaryWriter
 from inr_model import INR
 from utils import *
 
+UNIFORM_TRAINING_EPOCHS = 30
+GIBBS_TRAINING_EPOCHS = 15
+INTRA_RAY_DEGREES = 1
+
 torch.manual_seed(41)
 model = INR()
 loss_fn = torch.nn.MSELoss()
@@ -18,11 +22,21 @@ def train_one_epoch(epoch_index, tb_writer):
     running_loss = 0.
     last_loss = 0.
 
+    if epoch_index == 0:
+        ray_image = np.zeros((500, 500, 1), np.uint8)
+
     for val_index in range(10000):  # 1000 batches
         x = np.random.uniform(0., 500., 128)
         y = np.random.uniform(0., 500., 128)
 
-        inputs = [[x[index], y[index]] for index in range(128)]
+        inputs = [fall_to_nearest_ray([x[index], y[index]], [250, 250], INTRA_RAY_DEGREES) for index in range(128)]
+
+        if epoch_index == 0:
+            for p in inputs:
+                if p[0] < 499 and p[1] < 499:
+                    ray_image[round(p[1]), round(p[0])] = [255]
+            cv.imshow('rays', ray_image)
+            cv.waitKey(1)
 
         labels = torch.tensor([[oracle(p)] for p in inputs], dtype=torch.float32, requires_grad=True)
 
@@ -53,7 +67,8 @@ def train_one_gibbs_epoch(epoch_index, tb_writer, distr):
         biggs_x = (sampled // cols) + x_offset
         biggs_y = (sampled % cols) + y_offset
 
-        inputs = [[biggs_x[index], biggs_y[index]] for index in range(128)]
+        inputs = [fall_to_nearest_ray([biggs_x[index], biggs_y[index]], [250, 250], INTRA_RAY_DEGREES) for index in
+                  range(128)]
 
         labels = torch.tensor([[oracle(p)] for p in inputs], dtype=torch.float32, requires_grad=True)
 
@@ -77,9 +92,6 @@ def train_one_gibbs_epoch(epoch_index, tb_writer, distr):
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 writer = SummaryWriter('step-1-runs/model_trainer_{}'.format(timestamp))
 epoch_number = 0
-
-UNIFORM_TRAINING_EPOCHS = 30
-GIBBS_TRAINING_EPOCHS = 15
 best_vloss = 1_000_000.
 
 for epoch in range(UNIFORM_TRAINING_EPOCHS):
@@ -100,7 +112,8 @@ for epoch in range(UNIFORM_TRAINING_EPOCHS):
             val_x = np.random.uniform(0., 500., 128)
             val_y = np.random.uniform(0., 500., 128)
 
-            v_inputs = [[val_x[index], val_y[index]] for index in range(128)]
+            v_inputs = [fall_to_nearest_ray([val_x[index], val_y[index]], [250, 250], INTRA_RAY_DEGREES) for index in
+                        range(128)]
             v_labels = torch.tensor([[oracle(p)] for p in v_inputs], dtype=torch.float32, requires_grad=True)
 
             v_outputs = model(torch.tensor(v_inputs, dtype=torch.float32, requires_grad=True))
@@ -170,7 +183,8 @@ for epoch in range(GIBBS_TRAINING_EPOCHS):
             val_x = sampled_index // num_cols
             val_y = sampled_index % num_cols
 
-            v_inputs = [[val_x[index], val_y[index]] for index in range(128)]
+            v_inputs = [fall_to_nearest_ray([val_x[index], val_y[index]], [250, 250], INTRA_RAY_DEGREES) for index in
+                        range(128)]
             v_labels = torch.tensor([[oracle(p)] for p in v_inputs], dtype=torch.float32, requires_grad=True)
 
             v_outputs = model(torch.tensor(v_inputs, dtype=torch.float32, requires_grad=True))
