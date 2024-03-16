@@ -1,5 +1,7 @@
 import random
 
+import cv2 as cv
+
 from utils import *
 
 image = np.zeros((500, 500, 1), np.uint8)
