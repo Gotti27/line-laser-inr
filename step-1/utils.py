@@ -1,5 +1,6 @@
 import math
 
+import cv2 as cv
 import numpy as np
 
 
@@ -34,3 +35,25 @@ def fall_to_nearest_ray(point, center, ray_number):
     radius, angle = convert_cartesian_to_polar(center, point)
     angle = round(angle / ray_number) * ray_number
     return convert_polar_to_cartesian(angle, radius, center)
+
+
+def generate_laser_points(start_point, angle, direction, frame):
+    cv.drawMarker(frame, start_point, (255, 255, 255), cv.MARKER_TRIANGLE_UP, 10, 1)
+    p = np.array(np.around(convert_polar_to_cartesian(angle, -500 * direction, start_point)), dtype=int)
+    p1 = np.array(np.around(convert_polar_to_cartesian(angle, 500 * direction, start_point)), dtype=int)
+    cv.drawMarker(frame, p1, [255, 255, 255], cv.MARKER_DIAMOND, 10, 1)
+    p2 = np.array(np.around(convert_polar_to_cartesian(angle, 50 * direction, start_point)), dtype=int)
+    cv.arrowedLine(frame, start_point, p2, (100, 100, 100), 1, tipLength=0.5)
+
+    has_collided = False
+
+    for r in range(-500, 500):
+        radius = r * direction
+        test_point = np.array(np.around(convert_polar_to_cartesian(angle, radius, start_point)), dtype=int)
+        if oracle(test_point) < 0:
+            cv.line(frame, p, test_point, (100, 100, 100), 1)
+            has_collided = True
+            break
+
+    if not has_collided:
+        cv.line(frame, p, p1, (100, 100, 100), 1)
