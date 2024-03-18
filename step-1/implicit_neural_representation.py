@@ -1,7 +1,7 @@
+import random
 from datetime import datetime
 from random import uniform
 
-import cv2 as cv
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
@@ -9,7 +9,7 @@ from inr_model import INR
 from utils import *
 
 UNIFORM_TRAINING_EPOCHS = 30
-GIBBS_TRAINING_EPOCHS = 15
+GRADIENT_BASED_TRAINING_EPOCHS = 15
 INTRA_RAY_DEGREES = 1
 
 torch.manual_seed(41)
@@ -138,7 +138,7 @@ for epoch in range(UNIFORM_TRAINING_EPOCHS):
 
     epoch_number += 1
 
-for epoch in range(GIBBS_TRAINING_EPOCHS):
+for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
     print('EPOCH {}:'.format(epoch_number + 1))
 
     gradient_image = np.zeros((500, 500, 1), np.float32)
