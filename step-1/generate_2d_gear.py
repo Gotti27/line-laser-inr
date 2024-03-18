@@ -1,7 +1,5 @@
 import random
 
-import cv2 as cv
-
 from utils import *
 
 image = np.zeros((500, 500, 1), np.uint8)
@@ -17,7 +15,7 @@ cv.drawMarker(image, (250, 250), (100, 0, 0), cv.MARKER_CROSS, 10, 1)
 #              cv.MARKER_CROSS, 30, 5)
 
 for _ in range(10):
-    generate_laser_points(
+    simulate_laser_rays(
         [random.randint(0, 500), random.randint(0, 500)],
         random.uniform(0., 360.), -1 if random.randint(0, 10) % 2 else 1, image)
 

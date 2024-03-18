@@ -37,7 +37,8 @@ def fall_to_nearest_ray(point, center, ray_number):
     return convert_polar_to_cartesian(angle, radius, center)
 
 
-def generate_laser_points(start_point, angle, direction, frame):
+def simulate_laser_rays(start_point, angle, direction, frame):
+    direction = 1
     cv.drawMarker(frame, start_point, (255, 255, 255), cv.MARKER_TRIANGLE_UP, 10, 1)
     p = np.array(np.around(convert_polar_to_cartesian(angle, -500 * direction, start_point)), dtype=int)
     p1 = np.array(np.around(convert_polar_to_cartesian(angle, 500 * direction, start_point)), dtype=int)
@@ -51,9 +52,11 @@ def generate_laser_points(start_point, angle, direction, frame):
         radius = r * direction
         test_point = np.array(np.around(convert_polar_to_cartesian(angle, radius, start_point)), dtype=int)
         if oracle(test_point) < 0:
-            cv.line(frame, p, test_point, (100, 100, 100), 1)
+            cv.line(frame, p, test_point, (255, 255, 255), 1)
+            cv.line(frame, test_point, p1, (100, 100, 100), 1)
             has_collided = True
             break
 
     if not has_collided:
-        cv.line(frame, p, p1, (100, 100, 100), 1)
+        cv.line(frame, p, p1, (255, 255, 255), 1)
+
