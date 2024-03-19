@@ -76,3 +76,36 @@ def generate_laser_points(start_point, angle):
 
     return external, unknown
 
+
+def similarity(p, u, positives):
+    return sum([math.dist(p, pos.tolist()) * math.dist(u, pos.tolist()) for pos in positives])
+
+
+def w(u, k_nearest, threshold, positive):
+    return sum([similarity(u, neighbor[0], positive) for neighbor in k_nearest]) - threshold
+
+
+def compute_reliable_negatives(positive, unlabelled, threshold, k):
+    reliable_negatives = []
+    still_unlabelled = []
+
+    positive = list(filter(lambda p: 0 < p[0] < 500 and 0 < p[1] < 500, positive))
+    unlabelled = list(filter(lambda p: 0 < p[0] < 500 and 0 < p[1] < 500, unlabelled))
+
+    for u in unlabelled:
+        similarities = []
+        print(len(positive))
+        for p in positive:
+            similarities.append((p, similarity(p, u, positive)))
+
+        similarities.sort(key=lambda x: x[1])
+        neighbors = similarities[:k]
+        print(neighbors)
+
+        result = w(u, neighbors, threshold, positive)
+        if result < 0:
+            reliable_negatives.append(u)
+        else:
+            still_unlabelled.append(u)
+
+    return positive, still_unlabelled, reliable_negatives
