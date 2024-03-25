@@ -1,4 +1,3 @@
-import random
 from datetime import datetime
 from random import uniform
 
@@ -8,8 +7,8 @@ from torch.utils.tensorboard import SummaryWriter
 from inr_model import INR
 from utils import *
 
-UNIFORM_TRAINING_EPOCHS = 30
-GRADIENT_BASED_TRAINING_EPOCHS = 15
+UNIFORM_TRAINING_EPOCHS = 10
+GRADIENT_BASED_TRAINING_EPOCHS = 0
 INTRA_RAY_DEGREES = 1
 
 torch.manual_seed(41)
@@ -57,7 +56,7 @@ def train_one_epoch(epoch_index, tb_writer):
     return last_loss
 
 
-def train_one_gibbs_epoch(epoch_index, tb_writer, distr):
+def train_one_gradient_based_epoch(epoch_index, tb_writer, distr):
     running_loss = 0.
     last_loss = 0.
 
@@ -168,7 +167,7 @@ for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
 
     # Make sure gradient tracking is on, and do a pass over the data
     model.train(True)
-    avg_loss = train_one_gibbs_epoch(epoch_number, writer, flattened_distribution)
+    avg_loss = train_one_gradient_based_epoch(epoch_number, writer, flattened_distribution)
 
     running_vloss = 0.0
     # Set the model to evaluation mode, disabling dropout and using population
