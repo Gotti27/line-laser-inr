@@ -89,9 +89,6 @@ def compute_reliable_negatives(positive, unlabelled, threshold, k):
     reliable_negatives = []
     still_unlabelled = []
 
-    positive = list(filter(lambda p: 0 < p[0] < 500 and 0 < p[1] < 500, positive))
-    unlabelled = list(filter(lambda p: 0 < p[0] < 500 and 0 < p[1] < 500, unlabelled))
-
     for u in unlabelled:
         similarities = []
         for p in positive:
@@ -100,10 +97,9 @@ def compute_reliable_negatives(positive, unlabelled, threshold, k):
         similarities.sort(key=lambda x: x[1])
         neighbors = similarities[:k]
 
-        result = w(u, neighbors, threshold)
-        if result < 0:
-            reliable_negatives.append(u)
-        else:
+        if w(u, neighbors, threshold) < 0:
             still_unlabelled.append(u)
+        else:
+            reliable_negatives.append(u)
 
     return positive, still_unlabelled, reliable_negatives
