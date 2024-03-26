@@ -63,6 +63,7 @@ def simulate_laser_rays(start_point, angle, direction, frame):
 
 def generate_laser_points(start_point, angle):
     external = []
+    edge = []
     unknown = []
 
     found = False
@@ -70,8 +71,10 @@ def generate_laser_points(start_point, angle):
         test_point = np.array(np.around(convert_polar_to_cartesian(angle, radius, start_point)), dtype=int)
         if oracle(test_point) > 0 and not found:
             external.append(test_point)
+        elif -2 <= oracle(test_point) <= 0:
+            edge.append(test_point)
         else:
             unknown.append(test_point)
             found = True
 
-    return external, unknown
+    return external, edge, unknown
