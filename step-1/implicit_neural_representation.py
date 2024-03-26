@@ -1,3 +1,4 @@
+import random
 from datetime import datetime
 from random import uniform
 
@@ -7,8 +8,8 @@ from torch.utils.tensorboard import SummaryWriter
 from inr_model import INR
 from utils import *
 
-UNIFORM_TRAINING_EPOCHS = 30
-GRADIENT_BASED_TRAINING_EPOCHS = 10
+UNIFORM_TRAINING_EPOCHS = 10
+GRADIENT_BASED_TRAINING_EPOCHS = 5
 INTRA_RAY_DEGREES = 1
 
 torch.manual_seed(41)
@@ -21,21 +22,26 @@ def train_one_epoch(epoch_index, tb_writer):
     running_loss = 0.
     last_loss = 0.
 
-    if epoch_index == 0:
-        ray_image = np.zeros((500, 500, 1), np.uint8)
+    for val_index in range(100):  # batches
+        laser_rays = np.zeros((500, 500, 1), np.uint8)
+        laser_points = np.zeros((500, 500, 1), np.uint8)
+        laser_points.fill(255)
 
-    for val_index in range(10000):  # 1000 batches
-        x = np.random.uniform(0., 500., 128)
-        y = np.random.uniform(0., 500., 128)
+        angles = random.sample(range(0, 360), 300)
+        inputs = np.array([]).reshape(0, 2)
+        for r in range(100):
+            start_point = [250, 250]  # [random.randint(0, 500), random.randint(0, 500)]
+            angle = angles[r]  # random.uniform(0., 360.)
 
-        inputs = [fall_to_nearest_ray([x[index], y[index]], [250, 250], INTRA_RAY_DEGREES) for index in range(128)]
+            # direction = 1 if random.random() >= 0.5 else -1
+            simulate_laser_rays(start_point, angle, 1, laser_rays)
+            e, u = generate_laser_points(start_point, angle)
+            inputs = np.concatenate((inputs, random.sample(e, 64)), axis=0)
+            inputs = np.concatenate((inputs, random.sample(u, 64)), axis=0)
 
-        if epoch_index == 0:
-            for p in inputs:
-                if p[0] < 499 and p[1] < 499:
-                    ray_image[round(p[1]), round(p[0])] = [255]
-            cv.imshow('rays', ray_image)
-            cv.waitKey(1)
+        cv.imshow("laser negative points", laser_points)
+        cv.imshow("laser rays", laser_rays)
+        cv.waitKey(1)
 
         labels = torch.tensor([[np.sign(oracle(p))] for p in inputs], dtype=torch.float32, requires_grad=True)
 
@@ -60,7 +66,7 @@ def train_one_gradient_based_epoch(epoch_index, tb_writer, distr):
     running_loss = 0.
     last_loss = 0.
 
-    for val_index in range(2000):  # 1000 batches
+    for val_index in range(100):  # batches
         sampled = np.random.choice(np.arange(len(distr)), size=128, p=distr, replace=False)
         _, cols, _ = gradient_image.shape
         biggs_x = (sampled // cols) + x_offset
