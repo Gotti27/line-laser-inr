@@ -7,8 +7,8 @@ from torch.utils.tensorboard import SummaryWriter
 from inr_model import INR
 from utils import *
 
-UNIFORM_TRAINING_EPOCHS = 10
-GRADIENT_BASED_TRAINING_EPOCHS = 0
+UNIFORM_TRAINING_EPOCHS = 30
+GRADIENT_BASED_TRAINING_EPOCHS = 10
 INTRA_RAY_DEGREES = 1
 
 torch.manual_seed(41)
@@ -37,7 +37,7 @@ def train_one_epoch(epoch_index, tb_writer):
             cv.imshow('rays', ray_image)
             cv.waitKey(1)
 
-        labels = torch.tensor([[oracle(p)] for p in inputs], dtype=torch.float32, requires_grad=True)
+        labels = torch.tensor([[np.sign(oracle(p))] for p in inputs], dtype=torch.float32, requires_grad=True)
 
         optimizer.zero_grad()
         outputs = model(torch.tensor(inputs, dtype=torch.float32, requires_grad=True))
@@ -69,7 +69,7 @@ def train_one_gradient_based_epoch(epoch_index, tb_writer, distr):
         inputs = [fall_to_nearest_ray([biggs_x[index], biggs_y[index]], [250, 250], INTRA_RAY_DEGREES) for index in
                   range(128)]
 
-        labels = torch.tensor([[oracle(p)] for p in inputs], dtype=torch.float32, requires_grad=True)
+        labels = torch.tensor([[np.sign(oracle(p))] for p in inputs], dtype=torch.float32, requires_grad=True)
 
         optimizer.zero_grad()
         outputs = model(torch.tensor(inputs, dtype=torch.float32, requires_grad=True))
@@ -113,7 +113,7 @@ for epoch in range(UNIFORM_TRAINING_EPOCHS):
 
             v_inputs = [fall_to_nearest_ray([val_x[index], val_y[index]], [250, 250], INTRA_RAY_DEGREES) for index in
                         range(128)]
-            v_labels = torch.tensor([[oracle(p)] for p in v_inputs], dtype=torch.float32, requires_grad=True)
+            v_labels = torch.tensor([[np.sign(oracle(p))] for p in v_inputs], dtype=torch.float32, requires_grad=True)
 
             v_outputs = model(torch.tensor(v_inputs, dtype=torch.float32, requires_grad=True))
             vloss = loss_fn(v_outputs, v_labels)
@@ -184,7 +184,7 @@ for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
 
             v_inputs = [fall_to_nearest_ray([val_x[index], val_y[index]], [250, 250], INTRA_RAY_DEGREES) for index in
                         range(128)]
-            v_labels = torch.tensor([[oracle(p)] for p in v_inputs], dtype=torch.float32, requires_grad=True)
+            v_labels = torch.tensor([[np.sign(oracle(p))] for p in v_inputs], dtype=torch.float32, requires_grad=True)
 
             v_outputs = model(torch.tensor(v_inputs, dtype=torch.float32, requires_grad=True))
             vloss = loss_fn(v_outputs, v_labels)
