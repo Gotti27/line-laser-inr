@@ -2,6 +2,7 @@ import math
 
 import cv2 as cv
 import numpy as np
+from scipy import spatial
 
 
 def gear(angle):
@@ -82,3 +83,30 @@ def generate_laser_points(start_point, angle):
             found = True
 
     return external, edge, unknown
+
+
+def knn_point_classification(external, internal, unknown, k=5):
+    ret_external = [] + external
+    ret_internal = [] + internal
+    all_points = [] + external + internal
+    kd_tree = spatial.KDTree(all_points)
+    _, neighbors = kd_tree.query(unknown, k=k)
+    print("Tree built and neighbors extracted")
+
+    for i, u in enumerate(unknown):
+        point_neighbors = neighbors[i]
+        ext_sum = 0
+        int_sum = 0
+        for n in point_neighbors:
+            if all_points[n].tolist() in np.array(external).tolist():
+                ext_sum += 1
+            else:
+                int_sum += 1
+        if ext_sum >= int_sum:
+            ret_external.append(u)
+        else:
+            ret_internal.append(u)
+
+    print()
+
+    return ret_external, ret_internal
