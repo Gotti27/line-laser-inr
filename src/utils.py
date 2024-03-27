@@ -2,6 +2,7 @@ import math
 
 import cv2 as cv
 import numpy as np
+from scipy import spatial
 
 
 def gear(angle):
@@ -12,6 +13,10 @@ def oracle(point):
     radius, angle = convert_cartesian_to_polar((250, 250), point)
     diff = radius - gear(angle)
     return diff  # np.sign(diff)
+
+
+def realistic_oracle(point):
+    return np.sign(oracle(point))
 
 
 def convert_cartesian_to_polar(center, point):
@@ -63,6 +68,7 @@ def simulate_laser_rays(start_point, angle, direction, frame):
 
 def generate_laser_points(start_point, angle):
     external = []
+    edge = []
     unknown = []
 
     found = False
@@ -70,8 +76,31 @@ def generate_laser_points(start_point, angle):
         test_point = np.array(np.around(convert_polar_to_cartesian(angle, radius, start_point)), dtype=int)
         if oracle(test_point) > 0 and not found:
             external.append(test_point)
+        elif -2 <= oracle(test_point) <= 0:
+            edge.append(test_point)
         else:
             unknown.append(test_point)
             found = True
 
-    return external, unknown
+    return external, edge, unknown
+
+
+def knn_point_classification(external, internal, unknown, k=5):
+    ret_external = [] + external
+    ret_internal = [] + internal
+    all_points = [] + external + internal
+    kd_tree = spatial.KDTree(all_points)
+    _, neighbors = kd_tree.query(unknown, k=k)
+
+    external_list = np.array(external).tolist()
+    all_points_list = [a.tolist() for a in all_points]
+    for i, u in enumerate(unknown):
+        point_neighbors = neighbors[i]
+        point_class = sum([1 if all_points_list[n] in external_list else -1 for n in point_neighbors])
+
+        if point_class <= 0:
+            ret_internal.append(u)
+        else:
+            ret_external.append(u)
+
+    return ret_external, ret_internal
