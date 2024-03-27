@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from inr_model import INR
-from step2.marching_squares import marching_squares
+from marching_squares import marching_squares
 
 torch.manual_seed(41)
 model = INR()
