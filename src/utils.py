@@ -14,6 +14,10 @@ def oracle(point):
     return diff  # np.sign(diff)
 
 
+def realistic_oracle(point):
+    return np.sign(oracle(point))
+
+
 def convert_cartesian_to_polar(center, point):
     vector = (point[0] - center[0], point[1] - center[1])
     radius = np.linalg.norm(vector)
