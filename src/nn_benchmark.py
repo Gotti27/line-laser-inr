@@ -1,3 +1,4 @@
+import datetime
 import time
 
 import cv2 as cv
@@ -40,5 +41,6 @@ for t in reversed(range(5, 50, 5)):
 cv.waitKey(0)
 cv.destroyAllWindows()
 
-cv.imwrite('full.png', image)
-cv.imwrite('zoom.png', zoom)
+timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+cv.imwrite(f'images/{timestamp}_full.png', image)
+cv.imwrite(f'images/{timestamp}_zoom.png', zoom)

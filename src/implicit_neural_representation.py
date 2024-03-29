@@ -12,6 +12,8 @@ UNIFORM_TRAINING_EPOCHS = 10
 GRADIENT_BASED_TRAINING_EPOCHS = 5
 INTRA_RAY_DEGREES = 1
 
+print(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
+
 torch.manual_seed(41)
 model = INR()
 loss_fn = torch.nn.MSELoss()
@@ -95,7 +97,7 @@ def train_one_gradient_based_epoch(epoch_index, tb_writer, distr):
 
 
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-writer = SummaryWriter('step-1-runs/model_trainer_{}'.format(timestamp))
+writer = SummaryWriter('runs/model_trainer_{}'.format(timestamp))
 epoch_number = 0
 best_vloss = 1_000_000.
 
@@ -213,7 +215,7 @@ for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
 
     epoch_number += 1
 
-print("done")
+print(f"done {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
 # cv.waitKey(0)
 cv.destroyAllWindows()
 
