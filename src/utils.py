@@ -96,7 +96,10 @@ def knn_point_classification(external, internal, unknown, k=5):
     all_points_list = [a.tolist() for a in all_points]
     for i, u in enumerate(unknown):
         point_neighbors = neighbors[i]
-        point_class = sum([1 if all_points_list[n] in external_list else -1 for n in point_neighbors])
+        if k == 1:
+            point_class = sum([1 if all_points_list[point_neighbors] in external_list else -1])
+        else:
+            point_class = sum([1 if all_points_list[n] in external_list else -1 for n in point_neighbors])
 
         if point_class <= 0:
             ret_internal.append(u)
