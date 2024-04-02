@@ -76,7 +76,7 @@ def generate_laser_points(start_point, angle):
         test_point = np.array(np.around(convert_polar_to_cartesian(angle, radius, start_point)), dtype=int)
         if oracle(test_point) > 0 and not found:
             external.append(test_point)
-        elif -2 <= oracle(test_point) <= 0:
+        elif -5 <= oracle(test_point) <= 0:
             edge.append(test_point)
         else:
             unknown.append(test_point)
@@ -96,7 +96,10 @@ def knn_point_classification(external, internal, unknown, k=5):
     all_points_list = [a.tolist() for a in all_points]
     for i, u in enumerate(unknown):
         point_neighbors = neighbors[i]
-        point_class = sum([1 if all_points_list[n] in external_list else -1 for n in point_neighbors])
+        if k == 1:
+            point_class = sum([1 if all_points_list[point_neighbors] in external_list else -1])
+        else:
+            point_class = sum([1 if all_points_list[n] in external_list else -1 for n in point_neighbors])
 
         if point_class <= 0:
             ret_internal.append(u)

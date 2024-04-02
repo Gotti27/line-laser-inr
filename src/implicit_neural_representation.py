@@ -9,8 +9,10 @@ from inr_model import INR
 from utils import *
 
 UNIFORM_TRAINING_EPOCHS = 10
-GRADIENT_BASED_TRAINING_EPOCHS = 5
+GRADIENT_BASED_TRAINING_EPOCHS = 0
 INTRA_RAY_DEGREES = 1
+
+print(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
 
 torch.manual_seed(41)
 model = INR()
@@ -26,27 +28,58 @@ def train_one_epoch(epoch_index, tb_writer):
         laser_rays = np.zeros((500, 500, 1), np.uint8)
         laser_points = np.zeros((500, 500, 1), np.uint8)
         laser_points.fill(255)
+        laser_points_after_knn = np.zeros((500, 500, 1), np.uint8)
+        laser_points_after_knn.fill(255)
 
-        angles = random.sample(range(0, 360), 300)
+        external = []
+        internal = []
+        unknown = []
+
+        # angles = random.sample(range(0, 360), 300)
         inputs = np.array([]).reshape(0, 2)
-        for r in range(100):
+        for _ in range(300):
             start_point = [250, 250]  # [random.randint(0, 500), random.randint(0, 500)]
-            angle = angles[r]  # random.uniform(0., 360.)
+            angle = random.uniform(0., 360.)
 
             # direction = 1 if random.random() >= 0.5 else -1
             simulate_laser_rays(start_point, angle, 1, laser_rays)
-            e, u = generate_laser_points(start_point, angle)
-            inputs = np.concatenate((inputs, random.sample(e, 64)), axis=0)
-            inputs = np.concatenate((inputs, random.sample(u, 64)), axis=0)
+            e, inner, u = generate_laser_points(start_point, angle)
+            external.extend(random.sample(e, 40 if len(e) > 40 else len(e)))
+            internal.extend(random.sample(inner, 40 if len(inner) > 40 else len(inner)))
+            unknown.extend(random.sample(u, 40 if len(u) > 40 else len(u)))
+
+            # inputs = np.concatenate((inputs, random.sample(e, 64)), axis=0)
+            # inputs = np.concatenate((inputs, random.sample(u, 64)), axis=0)
+
+        external, internal = knn_point_classification(external, internal, unknown, 5)
+
+        for e in list(filter(lambda p: 0 < p[0] < 500 and 0 < p[1] < 500, external)):
+            laser_points_after_knn[e[1], e[0]] = 150
+            # laser_points[e[1], e[0]] = 0
+
+        for inne in list(filter(lambda p: 0 < p[0] < 500 and 0 < p[1] < 500, internal)):
+            laser_points[inne[1], inne[0]] = 0
+            laser_points_after_knn[inne[1], inne[0]] = 0
 
         cv.imshow("laser negative points", laser_points)
+        cv.imshow("laser negative points after knn", laser_points_after_knn)
         cv.imshow("laser rays", laser_rays)
         cv.waitKey(1)
 
-        labels = torch.tensor([[np.sign(oracle(p))] for p in inputs], dtype=torch.float32, requires_grad=True)
+        inputs = np.concatenate((inputs, external), axis=0)
+        inputs = np.concatenate((inputs, internal), axis=0)
+
+        # np.random.shuffle(inputs)
+
+        labels = torch.tensor([[1] for _ in external] + [[-1] for _ in internal], dtype=torch.float32,
+                              requires_grad=True)
+        '''
+        labels = torch.tensor([[realistic_oracle(p)] for p in inputs], dtype=torch.float32,
+                              requires_grad=True)
+        '''
 
         optimizer.zero_grad()
-        outputs = model(torch.tensor(inputs, dtype=torch.float32, requires_grad=True))
+        outputs = model(torch.tensor(np.array(inputs), dtype=torch.float32, requires_grad=True))
         loss = loss_fn(outputs, labels)
         loss.backward()
         optimizer.step()
@@ -95,7 +128,7 @@ def train_one_gradient_based_epoch(epoch_index, tb_writer, distr):
 
 
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-writer = SummaryWriter('step-1-runs/model_trainer_{}'.format(timestamp))
+writer = SummaryWriter('runs/model_trainer_{}'.format(timestamp))
 epoch_number = 0
 best_vloss = 1_000_000.
 
@@ -213,7 +246,7 @@ for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
 
     epoch_number += 1
 
-print("done")
+print(f"done {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
 # cv.waitKey(0)
 cv.destroyAllWindows()
 
