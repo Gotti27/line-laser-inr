@@ -1,6 +1,5 @@
 import random
 from datetime import datetime
-from random import uniform
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -9,7 +8,7 @@ from inr_model import INR
 from utils import *
 
 UNIFORM_TRAINING_EPOCHS = 10
-GRADIENT_BASED_TRAINING_EPOCHS = 0
+GRADIENT_BASED_TRAINING_EPOCHS = 5
 INTRA_RAY_DEGREES = 1
 
 print(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
@@ -95,20 +94,95 @@ def train_one_epoch(epoch_index, tb_writer):
     return last_loss
 
 
-def train_one_gradient_based_epoch(epoch_index, tb_writer, distr):
+def train_one_gradient_based_epoch(epoch_index, tb_writer):
     running_loss = 0.
     last_loss = 0.
 
-    for val_index in range(100):  # batches
-        sampled = np.random.choice(np.arange(len(distr)), size=128, p=distr, replace=False)
-        _, cols, _ = gradient_image.shape
-        biggs_x = (sampled // cols) + x_offset
-        biggs_y = (sampled % cols) + y_offset
+    for val_index in range(50):  # batches
+        laser_points = np.zeros((500, 500, 1), np.uint8)
+        external = []
+        internal = []
+        unknown = []
 
-        inputs = [fall_to_nearest_ray([biggs_x[index], biggs_y[index]], [250, 250], INTRA_RAY_DEGREES) for index in
-                  range(128)]
+        inputs = np.array([]).reshape(0, 2)
+        for _ in range(200):
+            start_point = [250, 250]
+            angle = random.uniform(0., 360.)
 
-        labels = torch.tensor([[np.sign(oracle(p))] for p in inputs], dtype=torch.float32, requires_grad=True)
+            e, inner, u = generate_laser_points(start_point, angle)
+
+            ###
+            t = []
+            for point in e:
+                point_tensor = torch.tensor([[point[0], point[1]]],
+                                            dtype=torch.float32, requires_grad=True)
+                point_output = model(point_tensor)
+                point_output.backward()
+                t.append(point_tensor.grad[0])
+
+            gradient_values = np.array([math.sqrt((point[0] ** 2) + (point[1] ** 2)) for point in t])
+            gradient_values /= sum(gradient_values)
+            distribution = gradient_values.flatten()
+
+            for sampled in np.random.choice(np.array([d for d in range(len(distribution))]),
+                                            size=(20 if len(t) > 20 else len(t)),
+                                            p=distribution, replace=False):
+                external.append(e[sampled])
+
+            ###
+            t = []
+            for point in inner:
+                point_tensor = torch.tensor([[point[0], point[1]]],
+                                            dtype=torch.float32, requires_grad=True)
+                point_output = model(point_tensor)
+                point_output.backward()
+                t.append(point_tensor.grad[0])
+
+            gradient_values = np.array([math.sqrt((point[0] ** 2) + (point[1] ** 2)) for point in t])
+            gradient_values /= sum(gradient_values)
+            distribution = gradient_values.flatten()
+
+            for sampled in np.random.choice(np.array([d for d in range(len(distribution))]),
+                                            size=(20 if len(t) > 20 else len(t)),
+                                            p=distribution, replace=False):
+                internal.append(inner[sampled])
+            ###
+            t = []
+            for point in u:
+                point_tensor = torch.tensor([[point[0], point[1]]],
+                                            dtype=torch.float32, requires_grad=True)
+                point_output = model(point_tensor)
+                point_output.backward()
+                t.append(point_tensor.grad[0])
+
+            gradient_values = np.array([math.sqrt((point[0] ** 2) + (point[1] ** 2)) for point in t])
+            gradient_values /= sum(gradient_values)
+            distribution = gradient_values.flatten()
+
+            for sampled in np.random.choice(np.array([d for d in range(len(distribution))]),
+                                            size=(20 if len(t) > 20 else len(t)),
+                                            p=distribution, replace=False):
+                unknown.append(u[sampled])
+
+            ###
+
+        external, internal = knn_point_classification(external, internal, unknown, 5)
+
+        inputs = np.concatenate((inputs, external), axis=0)
+        inputs = np.concatenate((inputs, internal), axis=0)
+
+        for p in inputs:
+            px = round(p[1])
+            py = round(p[0])
+            if 0 <= px < 500 and 0 <= py < 500:
+                laser_points[px, py] = 255
+
+        cv.imshow('gradient based sampling', laser_points)
+        cv.imwrite(f'extracted_{epoch_index}.png', laser_points)
+        cv.waitKey(1)
+
+        labels = torch.tensor([[1] for _ in external] + [[-1] for _ in internal], dtype=torch.float32,
+                              requires_grad=True)
 
         optimizer.zero_grad()
         outputs = model(torch.tensor(inputs, dtype=torch.float32, requires_grad=True))
@@ -152,7 +226,7 @@ for epoch in range(UNIFORM_TRAINING_EPOCHS):
 
             v_inputs = [fall_to_nearest_ray([val_x[index], val_y[index]], [250, 250], INTRA_RAY_DEGREES) for index in
                         range(128)]
-            v_labels = torch.tensor([[np.sign(oracle(p))] for p in v_inputs], dtype=torch.float32, requires_grad=True)
+            v_labels = torch.tensor([[realistic_oracle(p)] for p in v_inputs], dtype=torch.float32, requires_grad=True)
 
             v_outputs = model(torch.tensor(v_inputs, dtype=torch.float32, requires_grad=True))
             vloss = loss_fn(v_outputs, v_labels)
@@ -183,11 +257,9 @@ for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
     image = np.zeros((500, 500, 1), np.uint8)
 
     gradient_sum = 0.
-    x_offset = uniform(0.0, 1.0)
-    y_offset = uniform(0.0, 1.0)
     for i in range(500):
         for j in range(500):
-            x = torch.tensor([[j + x_offset, i + y_offset]], dtype=torch.float32, requires_grad=True)
+            x = torch.tensor([[j, i]], dtype=torch.float32, requires_grad=True)
             output = model(x)
             output.backward()
             a, b = x.grad[0]
@@ -202,11 +274,12 @@ for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
 
     image = gradient_image * 255.
     cv.imshow("gradient", image)
+    cv.imwrite(f"images/gradient_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}-{epoch_number}.png", image)
     cv.waitKey(1)
 
     # Make sure gradient tracking is on, and do a pass over the data
     model.train(True)
-    avg_loss = train_one_gradient_based_epoch(epoch_number, writer, flattened_distribution)
+    avg_loss = train_one_gradient_based_epoch(epoch_number, writer)
 
     running_vloss = 0.0
     # Set the model to evaluation mode, disabling dropout and using population
@@ -223,7 +296,7 @@ for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
 
             v_inputs = [fall_to_nearest_ray([val_x[index], val_y[index]], [250, 250], INTRA_RAY_DEGREES) for index in
                         range(128)]
-            v_labels = torch.tensor([[np.sign(oracle(p))] for p in v_inputs], dtype=torch.float32, requires_grad=True)
+            v_labels = torch.tensor([[realistic_oracle(p)] for p in v_inputs], dtype=torch.float32, requires_grad=True)
 
             v_outputs = model(torch.tensor(v_inputs, dtype=torch.float32, requires_grad=True))
             vloss = loss_fn(v_outputs, v_labels)
