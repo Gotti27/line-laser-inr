@@ -42,7 +42,7 @@ def train_one_epoch(epoch_index, tb_writer):
             angle = random.uniform(0., 360.)
 
             # direction = 1 if random.random() >= 0.5 else -1
-            simulate_laser_rays(start_point, angle, 1, laser_rays)
+            simulate_laser_ray(start_point, angle, 1, laser_rays)
             e, inner, u = generate_laser_points(start_point, angle)
             external.extend(random.sample(e, 40 if len(e) > 40 else len(e)))
             internal.extend(random.sample(inner, 40 if len(inner) > 40 else len(inner)))

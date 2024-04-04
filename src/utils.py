@@ -42,7 +42,7 @@ def fall_to_nearest_ray(point, center, ray_number):
     return convert_polar_to_cartesian(angle, radius, center)
 
 
-def simulate_laser_rays(start_point, angle, direction, frame):
+def simulate_laser_ray(start_point, angle, direction, frame):
     direction = 1
     cv.drawMarker(frame, start_point, (255, 255, 255), cv.MARKER_TRIANGLE_UP, 10, 1)
     p = np.array(np.around(convert_polar_to_cartesian(angle, -500 * direction, start_point)), dtype=int)
