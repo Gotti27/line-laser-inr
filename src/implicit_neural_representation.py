@@ -131,7 +131,7 @@ def train_one_gradient_based_epoch(epoch_index, tb_writer):
         unknown = []
 
         inputs = np.array([]).reshape(0, 2)
-        for _ in range(100):
+        for _ in range(200):
             start_point = [250, 250]
             angle = random.uniform(0., 360.)
 
@@ -282,26 +282,26 @@ for epoch in range(UNIFORM_TRAINING_EPOCHS):
 for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
     print('EPOCH {}:'.format(epoch_number + 1))
 
-    gradient_image = np.zeros((500, 500, 1), np.float32)
-    image = np.zeros((500, 500, 1), np.uint8)
-
-    gradient_sum = 0.
-    for i in range(500):
-        for j in range(500):
-            x = torch.tensor([[j, i]], dtype=torch.float32, requires_grad=True, device=device)
-            output = model(x)
-            output.backward()
-            a, b = x.grad[0]
-            value = math.sqrt((a ** 2) + (b ** 2))
-            gradient_sum += value
-            gradient_image[j, i] = value
-            # image[i, j] = 255 if value > 1 else value
-
-    print("sum ", gradient_sum)
-    gradient_image /= gradient_sum
-    flattened_distribution = gradient_image.flatten()
-
     if debug:
+        gradient_image = np.zeros((500, 500, 1), np.float32)
+        image = np.zeros((500, 500, 1), np.uint8)
+
+        gradient_sum = 0.
+        for i in range(500):
+            for j in range(500):
+                x = torch.tensor([[j, i]], dtype=torch.float32, requires_grad=True, device=device)
+                output = model(x)
+                output.backward()
+                a, b = x.grad[0]
+                value = math.sqrt((a ** 2) + (b ** 2))
+                gradient_sum += value
+                gradient_image[j, i] = value
+                # image[i, j] = 255 if value > 1 else value
+
+        print("sum ", gradient_sum)
+        gradient_image /= gradient_sum
+        flattened_distribution = gradient_image.flatten()
+
         image = gradient_image * 255.
         cv.imshow("gradient", image)
         cv.imwrite(f"images/gradient_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}-{epoch_number}.png", image)
