@@ -319,13 +319,10 @@ for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
     # Disable gradient computation and reduce memory consumption.
     with torch.no_grad():
         for val_v_index in range(100):
-            sampled_index = np.random.choice(np.arange(len(flattened_distribution)), size=128, p=flattened_distribution)
-            _, num_cols, _ = gradient_image.shape
-            val_x = sampled_index // num_cols
-            val_y = sampled_index % num_cols
+            val_x = np.random.uniform(0., 500., 128)
+            val_y = np.random.uniform(0., 500., 128)
 
-            v_inputs = [fall_to_nearest_ray([val_x[index], val_y[index]], [250, 250], INTRA_RAY_DEGREES) for index in
-                        range(128)]
+            v_inputs = [[val_x[index], val_y[index]] for index in range(128)]
             v_labels = torch.tensor([[realistic_oracle(p)] for p in v_inputs], dtype=torch.float32, requires_grad=True,
                                     device=device)
 
