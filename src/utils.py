@@ -92,14 +92,13 @@ def knn_point_classification(external, internal, unknown, k=5):
     kd_tree = spatial.KDTree(all_points)
     _, neighbors = kd_tree.query(unknown, k=k)
 
-    external_list = np.array(external).tolist()
-    all_points_list = [a.tolist() for a in all_points]
+    all_labels = [1 for _ in external] + [-1 for _ in internal]
     for i, u in enumerate(unknown):
         point_neighbors = neighbors[i]
         if k == 1:
-            point_class = sum([1 if all_points_list[point_neighbors] in external_list else -1])
+            point_class = sum([all_labels[point_neighbors]])
         else:
-            point_class = sum([1 if all_points_list[n] in external_list else -1 for n in point_neighbors])
+            point_class = sum([all_labels[n] for n in point_neighbors])
 
         if point_class <= 0:
             ret_internal.append(u)
