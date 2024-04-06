@@ -14,7 +14,12 @@ INTRA_RAY_DEGREES = 1
 print(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
 
 torch.manual_seed(41)
-model = INR()
+
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+torch.set_default_device(device)
+model = INR(device=device)
+model.to(device)
 loss_fn = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
@@ -71,14 +76,14 @@ def train_one_epoch(epoch_index, tb_writer):
         # np.random.shuffle(inputs)
 
         labels = torch.tensor([[1] for _ in external] + [[-1] for _ in internal], dtype=torch.float32,
-                              requires_grad=True)
+                              requires_grad=True, device=device)
         '''
         labels = torch.tensor([[realistic_oracle(p)] for p in inputs], dtype=torch.float32,
                               requires_grad=True)
         '''
 
         optimizer.zero_grad()
-        outputs = model(torch.tensor(np.array(inputs), dtype=torch.float32, requires_grad=True))
+        outputs = model(torch.tensor(np.array(inputs), dtype=torch.float32, requires_grad=True, device=device))
         loss = loss_fn(outputs, labels)
         loss.backward()
         optimizer.step()
@@ -115,7 +120,7 @@ def train_one_gradient_based_epoch(epoch_index, tb_writer):
             t = []
             for point in e:
                 point_tensor = torch.tensor([[point[0], point[1]]],
-                                            dtype=torch.float32, requires_grad=True)
+                                            dtype=torch.float32, requires_grad=True, device=device)
                 point_output = model(point_tensor)
                 point_output.backward()
                 t.append(point_tensor.grad[0])
@@ -133,7 +138,7 @@ def train_one_gradient_based_epoch(epoch_index, tb_writer):
             t = []
             for point in inner:
                 point_tensor = torch.tensor([[point[0], point[1]]],
-                                            dtype=torch.float32, requires_grad=True)
+                                            dtype=torch.float32, requires_grad=True, device=device)
                 point_output = model(point_tensor)
                 point_output.backward()
                 t.append(point_tensor.grad[0])
@@ -150,7 +155,7 @@ def train_one_gradient_based_epoch(epoch_index, tb_writer):
             t = []
             for point in u:
                 point_tensor = torch.tensor([[point[0], point[1]]],
-                                            dtype=torch.float32, requires_grad=True)
+                                            dtype=torch.float32, requires_grad=True, device=device)
                 point_output = model(point_tensor)
                 point_output.backward()
                 t.append(point_tensor.grad[0])
@@ -182,10 +187,10 @@ def train_one_gradient_based_epoch(epoch_index, tb_writer):
         cv.waitKey(1)
 
         labels = torch.tensor([[1] for _ in external] + [[-1] for _ in internal], dtype=torch.float32,
-                              requires_grad=True)
+                              requires_grad=True, device=device)
 
         optimizer.zero_grad()
-        outputs = model(torch.tensor(inputs, dtype=torch.float32, requires_grad=True))
+        outputs = model(torch.tensor(inputs, dtype=torch.float32, requires_grad=True, device=device))
         loss = loss_fn(outputs, labels)
         loss.backward()
         optimizer.step()
@@ -226,9 +231,10 @@ for epoch in range(UNIFORM_TRAINING_EPOCHS):
 
             v_inputs = [fall_to_nearest_ray([val_x[index], val_y[index]], [250, 250], INTRA_RAY_DEGREES) for index in
                         range(128)]
-            v_labels = torch.tensor([[realistic_oracle(p)] for p in v_inputs], dtype=torch.float32, requires_grad=True)
+            v_labels = torch.tensor([[realistic_oracle(p)] for p in v_inputs], dtype=torch.float32, requires_grad=True,
+                                    device=device)
 
-            v_outputs = model(torch.tensor(v_inputs, dtype=torch.float32, requires_grad=True))
+            v_outputs = model(torch.tensor(v_inputs, dtype=torch.float32, requires_grad=True, device=device))
             vloss = loss_fn(v_outputs, v_labels)
             running_vloss += vloss
 
@@ -259,7 +265,7 @@ for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
     gradient_sum = 0.
     for i in range(500):
         for j in range(500):
-            x = torch.tensor([[j, i]], dtype=torch.float32, requires_grad=True)
+            x = torch.tensor([[j, i]], dtype=torch.float32, requires_grad=True, device=device)
             output = model(x)
             output.backward()
             a, b = x.grad[0]
@@ -296,9 +302,10 @@ for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
 
             v_inputs = [fall_to_nearest_ray([val_x[index], val_y[index]], [250, 250], INTRA_RAY_DEGREES) for index in
                         range(128)]
-            v_labels = torch.tensor([[realistic_oracle(p)] for p in v_inputs], dtype=torch.float32, requires_grad=True)
+            v_labels = torch.tensor([[realistic_oracle(p)] for p in v_inputs], dtype=torch.float32, requires_grad=True,
+                                    device=device)
 
-            v_outputs = model(torch.tensor(v_inputs, dtype=torch.float32, requires_grad=True))
+            v_outputs = model(torch.tensor(v_inputs, dtype=torch.float32, requires_grad=True, device=device))
             vloss = loss_fn(v_outputs, v_labels)
             running_vloss += vloss
 

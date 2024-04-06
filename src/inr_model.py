@@ -4,10 +4,10 @@ import torch.nn as nn
 
 
 class INR(nn.Module):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, device='cpu', *args, **kwargs):
         super().__init__(*args, **kwargs)
         sigma = 0.5 / 10
-        self.B = torch.normal(0, sigma, size=(64, 2))
+        self.B = torch.normal(0, sigma, size=(64, 2)).to(device)
         # self.encoding = rff.layers.GaussianEncoding(sigma=sigma, input_size=2, encoded_size=64)
 
         self.fc1 = nn.Linear(in_features=128, out_features=64)

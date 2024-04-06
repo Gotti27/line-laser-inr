@@ -8,12 +8,14 @@ import torch
 from inr_model import INR
 from marching_squares import marching_squares
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
 torch.manual_seed(41)
 model = INR()
 
 loss_fn = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-model.load_state_dict(torch.load('model'))
+model.load_state_dict(torch.load('model', map_location=device))
 image = np.zeros((500, 500, 1), np.uint8)
 zoom = np.zeros((500, 500, 1), np.uint8)
 
