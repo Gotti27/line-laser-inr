@@ -5,7 +5,7 @@ from datetime import datetime
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from inr_model import INR
+from inr_model import INR2D
 from utils import *
 
 UNIFORM_TRAINING_EPOCHS = 15
@@ -33,7 +33,7 @@ print(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
 torch.manual_seed(41)
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.set_default_device(device)
-model = INR(device=device)
+model = INR2D(device=device)
 model.to(device)
 loss_fn = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)

@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 
 
-class INR(nn.Module):
+class INR2D(nn.Module):
     def __init__(self, device='cpu', *args, **kwargs):
         super().__init__(*args, **kwargs)
         sigma = 0.5 / 10

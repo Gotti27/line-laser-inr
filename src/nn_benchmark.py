@@ -5,13 +5,13 @@ import cv2 as cv
 import numpy as np
 import torch
 
-from inr_model import INR
+from inr_model import INR2D
 from marching_squares import marching_squares
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 torch.manual_seed(41)
-model = INR()
+model = INR2D()
 
 loss_fn = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
