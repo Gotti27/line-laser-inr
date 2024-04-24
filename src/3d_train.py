@@ -2,6 +2,7 @@ import argparse
 import random
 from datetime import datetime
 
+import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from inr_model import INR3D
