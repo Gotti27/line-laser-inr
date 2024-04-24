@@ -64,8 +64,8 @@ images.sort(key=lambda name: int(name.split('_')[3].split('.')[0]))
 
 for image in images:
     frame = cv.imread(os.path.join(image_folder, image), cv.IMREAD_UNCHANGED)
-    render = test[:, :, 0:3]
-    depth_map = test[:, :, 3]
+    render = frame[:, :, 0:3]
+    depth_map = frame[:, :, 3]
     normalized_depth_map = cv.normalize(depth_map, None, 0, 255, cv.NORM_MINMAX, dtype=cv.CV_8U)
 
     cv.imshow("render", render)
