@@ -1,80 +1,209 @@
+import math
 import os
+import pickle
 import time
 
 import cv2 as cv
-import drjit as dr
 import mitsuba as mi
+import numpy as np
+
+from src.utils import rotate_y, rotate_x
 
 print(mi.variants())
 mi.set_variant('llvm_ad_rgb')
 
-scene = mi.load_file("scenes/gear.xml")
-
-image = mi.render(scene, spp=256)
-
-print(image)
-mi.util.write_bitmap(f"my_first_render_{0}.exr", image)
-time.sleep(1)
-
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
+
+# Calculating Camera Intrinsic parameters
+
+vertical_fov = 60
+img_width = 256
+img_height = 256
+
+fov_radians = math.radians(vertical_fov)
+fx = fy = img_width / (2 * math.tan(fov_radians / 2))
+
+Ox = img_width / 2.0
+Oy = img_height / 2.0
+
+K = np.array([
+    [fx, 0, Ox],
+    [0, fy, Oy],
+    [0, 0, 1]
+])
+
+print(K)
+
+###
 
 testing = False  # Just fooling the static analyzer :)
 if testing:
+    testing_angle = 0
+    scene = mi.load_file("scenes/gear.xml", angle=testing_angle)
+
+    image = mi.render(scene, spp=256)
+    print(image)
+    mi.util.write_bitmap(f"my_first_render_{0}.exr", image)
+    time.sleep(1)
     # test = np.array(image[:, :, 3])  # cv.imread("my_first_render_0.exr", cv.IMREAD_UNCHANGED)
     render = cv.imread("my_first_render_0.exr", cv.IMREAD_UNCHANGED)
     print(render.shape)
-    depth_map = render[:, :, 3]
-    normalized_depth_map = cv.normalize(depth_map, None, 0, 255, cv.NORM_MINMAX, dtype=cv.CV_16U)
+    # depth_map = render[:, :, 3]
+    # normalized_depth_map = cv.normalize(depth_map, None, 0, 255, cv.NORM_MINMAX, dtype=cv.CV_16U)
+    # cv.imshow("Depth Map", normalized_depth_map)
 
-    cv.imshow("Depth Map", normalized_depth_map)
-    cv.imshow("Render", render)
+    t = np.array([0, 2, 7.])
+    R = np.eye(3, 3)
+    R @= rotate_y(testing_angle)
+    R @= rotate_x(20)
+
+    camera_position = - np.matrix(R).T @ t
+    print("pose: ", camera_position)
+    print("Projection Matrix: ", K @ np.concatenate([R, np.matrix(t).T], axis=1))
+
+    print(np.append(camera_position, [[1]], axis=1))
+    laser_center = np.squeeze(np.asarray(camera_position)) @ rotate_y(30)
+    laser_normal = np.array([1, 0, 0]) @ rotate_x(20) @ rotate_y(30)
+    print("laser center: ", laser_center)
+    print("laser normal: ", laser_normal)
+
+    points = []
+    for p in [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 1], [0, 0, 0],
+              (laser_normal + np.array([0, 0, 0.])).tolist()]:
+        p.append(1)
+        camera_p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ p
+        points.append(
+            [camera_p[0, 0] / camera_p[0, 2], camera_p[0, 1] / camera_p[0, 2]]
+        )
+
+    origin = points[0]
+    top_x = points[1]
+    top_y = points[2]
+    top_z = points[3]
+    testing_point = points[4]
+    translated_origin = points[5]
+    normal_test = points[6]
+
+    cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_x[0])), int(round(top_x[1]))],
+            [0, 0, 255], 1)
+    cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_y[0])), int(round(top_y[1]))],
+            [0, 255, 0], 1)
+    cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_z[0])), int(round(top_z[1]))],
+            [255, 0, 0], 1)
+    cv.line(render, [int(round(origin[0])), int(round(origin[1]))],
+            [int(round(testing_point[0])), int(round(testing_point[1]))],
+            [255, 0, 255], 1)
+
+    cv.line(render, [int(round(translated_origin[0])), int(round(translated_origin[1]))],
+            [int(round(normal_test[0])), int(round(normal_test[1]))],
+            [255, 255, 0], 1)
+
+    cv.imshow("Render", render[:, :, 0:3])
     cv.waitKey(0)
     cv.destroyAllWindows()
-
     exit(0)
 
 do_all_renders = False
 if do_all_renders:
+    os.mkdir('renders')
     for i in range(360):
-        params = mi.traverse(scene)
-        rot = mi.Transform4f.rotate(axis=mi.Point3f([0, 0, 1]), angle=1)
-        v = dr.unravel(mi.Point3f, params['teapot.vertex_positions'])
-        params.update({
-            'teapot.vertex_positions': dr.ravel(rot @ v)
-        })
-
+        scene = mi.load_file("scenes/gear.xml", angle=i)
         image = mi.render(scene, spp=256)
 
-        mi.util.write_bitmap(f"renders/my_first_render_{i}.exr", image)
+        cv.imshow("rendering progress", np.array(image))
+        cv.waitKey(1)
+
+        mi.util.write_bitmap(f"renders/data_{i}_render.exr", image)
         print(f"{round(i / 360 * 100)}%")
 
     time.sleep(1)
 
 image_folder = 'renders'
-video_name = 'render.mp4'
-video_depth_name = 'renderDepth.mp4'
-
 images = [img for img in os.listdir(image_folder) if img.endswith(".exr")]
 frame = cv.imread(os.path.join(image_folder, images[0]))
 height, width, layers = frame.shape
 
-video = cv.VideoWriter(video_name, cv.VideoWriter_fourcc(*'MP4V'), 20.0, (width, height))
-video_depth = cv.VideoWriter(video_depth_name, cv.VideoWriter_fourcc(*'MP4V'), 20.0, (width, height))
-images.sort(key=lambda name: int(name.split('_')[3].split('.')[0]))
+images.sort(key=lambda name: int(name.split('_')[1]))
 
-for image in images:
-    frame = cv.imread(os.path.join(image_folder, image), cv.IMREAD_UNCHANGED)
-    render = frame[:, :, 0:3]
-    depth_map = frame[:, :, 3]
-    normalized_depth_map = cv.normalize(depth_map, None, 0, 255, cv.NORM_MINMAX, dtype=cv.CV_8U)
+positions = images[1::2]
+renders = images[0::2]
+
+images = []
+for i in range(len(renders)):
+    if "pos" in renders[i]:
+        images.append([positions[i], renders[i]])
+    else:
+        images.append([renders[i], positions[i]])
+
+for degree, image in enumerate(images):
+    render, position = image
+
+    render = cv.imread(os.path.join(image_folder, render), cv.IMREAD_UNCHANGED)
+    position = cv.imread(os.path.join(image_folder, position), cv.IMREAD_UNCHANGED)
+
+    red_render = render[:, :, 2] * 255
+    _, red_render = cv.threshold(red_render, 100, 255, cv.THRESH_BINARY)
+
+    t = np.array([0, 2, 7.])
+    R = np.eye(3, 3)
+    R @= rotate_x(20)
+    R @= rotate_y(degree)
+
+    camera_position = - np.matrix(R).T @ t
+    print("pose: ", camera_position)
+    print("Projection Matrix: ", K @ np.concatenate([R, np.matrix(t).T], axis=1))
+
+    print(np.append(camera_position, [[1]], axis=1))
+    laser_center = np.squeeze(np.asarray(camera_position)) @ rotate_y(30)
+    laser_normal = np.array([1, 0, 0]) @ rotate_x(20) @ rotate_y(degree) @ rotate_y(30)
+    print("laser center: ", laser_center)
+    print("laser normal: ", laser_normal)
+
+    with open(f'renders/data_{degree}.pkl', 'wb') as data_output_file:
+        pickle.dump(K, data_output_file)
+        pickle.dump(R, data_output_file)
+        pickle.dump(t, data_output_file)
+        pickle.dump(laser_center, data_output_file)
+        pickle.dump(laser_normal, data_output_file)
+
+    points = []
+
+    for p in [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 1], (laser_normal + np.array([0, 0, 0.])).tolist()]:
+        p.append(1)
+        camera_p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ p
+
+        points.append(
+            [camera_p[0, 0] / camera_p[0, 2], camera_p[0, 1] / camera_p[0, 2]]
+        )
+
+    origin = points[0]
+    top_x = points[1]
+    top_y = points[2]
+    top_z = points[3]
+    normal_test = points[5]
+
+    cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_x[0])), int(round(top_x[1]))],
+            [0, 0, 255], 1)
+    cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_y[0])), int(round(top_y[1]))],
+            [0, 255, 0], 1)
+    cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_z[0])), int(round(top_z[1]))],
+            [255, 0, 0], 1)
+    cv.line(render, [int(round(origin[0])), int(round(origin[1]))],
+            [int(round(normal_test[0])), int(round(normal_test[1]))],
+            [255, 255, 0], 1)
+
+    cv.putText(render, "x", [int(round(top_x[0])), int(round(top_x[1]))], cv.FONT_HERSHEY_SIMPLEX, 0.5, [0, 0, 255], 1)
+    cv.putText(render, "y", [int(round(top_y[0])), int(round(top_y[1]))], cv.FONT_HERSHEY_SIMPLEX, 0.5, [0, 255, 0], 1)
+    cv.putText(render, "z", [int(round(top_z[0])), int(round(top_z[1]))], cv.FONT_HERSHEY_SIMPLEX, 0.5, [255, 0, 0], 1)
+
+    # normalized_depth_map = cv.normalize(depth_map, None, 0, 255, cv.NORM_MINMAX, dtype=cv.CV_8U)
+    # cv.imshow("render depth", normalized_depth_map)
+    # cv.imshow("positions", position)
 
     cv.imshow("render", render)
-    cv.imshow("render depth", normalized_depth_map)
     cv.waitKey(1)
     time.sleep(1 / 60)
     # video.write(render)
     # video_depth.write(rendered_depth_map)
 
 cv.destroyAllWindows()
-video.release()
-video_depth.release()
