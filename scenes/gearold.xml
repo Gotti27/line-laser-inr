@@ -1,0 +1,50 @@
+<scene version="3.0.0">
+    <default name="spp" value="128"/>
+    <default name="res" value="256"/>
+    <default name="max_depth" value="6"/>
+    <default name="integrator" value="path"/>
+
+    <integrator type='$integrator'>
+        <integer name="max_depth" value="$max_depth"/>
+    </integrator>
+
+    <sensor type="perspective">
+        <float name="fov" value="45"/>
+        <transform name="toWorld">
+            <lookat target="0,0,0" origin="3,3,3" up="0,1,0"/>
+        </transform>
+        <film type="hdrfilm">
+            <integer name="width" value="800"/>
+            <integer name="height" value="600"/>
+        </film>
+    </sensor>
+
+    <!-- Define light source -->
+    <emitter type="spot">
+        <transform name="to_world">
+            <!-- Orient the light so that points from (1, 1, 1) towards (1, 2, 1) -->
+            <lookat origin="4, 4, 2" target="0, 0, 0" up="0, 0, 1"/>
+        </transform>
+        <spectrum name="intensity" value="100"/>
+        <float name="cutoffAngle" value="1"/>
+    </emitter>
+
+    <!-- Define object -->
+    <shape type="sphere">
+        <float name="radius" value="1"/>
+        <transform name="toWorld">
+            <translate x="0" y="0" z="0"/>
+        </transform>
+    </shape>
+
+    <emitter type="point" id="light1">
+        <point name="position" x="3" y="-10.0" z="6.0"/>
+        <rgb name="intensity" value="100.0"/>
+    </emitter>
+
+
+    <emitter type="point" id="light2">
+        <point name="position" x="-3" y="-10.0" z="-2.0"/>
+        <rgb name="intensity" value="100.0"/>
+    </emitter>
+</scene>
