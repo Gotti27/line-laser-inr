@@ -1,0 +1,69 @@
+<scene version='3.0.0'>
+    <default name="spp" value="256"/>
+    <default name="res" value="256"/>
+
+    <!--
+    <integrator type='direct'/>
+    -->
+    <integrator type="aov">
+        <string name="aovs" value="dd.y:depth"/>
+        <integrator type="direct" name="my_image"/>
+    </integrator>
+
+    <sensor type="perspective" id="sensor">
+        <float name="fov" value="40"/>
+        <transform name="to_world">
+            <!-- 1.25 -->
+            <lookat target="0.0, 0.0, 0.0"
+                    origin="0.0, -10.0, 10.0"
+                    up="0.0, 0.0, 1.0"/>
+            <!-- -6.0-->
+        </transform>
+        <sampler type="independent">
+            <integer name="sample_count" value="$spp"/>
+        </sampler>
+        <film type="hdrfilm">
+            <rfilter type="box"/>
+            <integer name="width" value="$res"/>
+            <integer name="height" value="$res"/>
+        </film>
+    </sensor>
+
+
+    <shape type="ply" id="teapot">
+        <string name="filename" value="meshes/teapot.ply"/>
+        <bsdf type="diffuse">
+            <rgb name="reflectance" value="1 1 1"/>
+        </bsdf>
+        <transform name="to_world">
+            <rotate z="1" angle="0"/>
+        </transform>
+    </shape>
+
+    <emitter type="point" id="light1">
+        <point name="position" x="3" y="-10.0" z="6.0"/>
+        <rgb name="intensity" value="10.0"/>
+    </emitter>
+
+    <emitter type="point" id="light2">
+        <point name="position" x="-3" y="-10.0" z="-2.0"/>
+        <rgb name="intensity" value="10.0"/>
+    </emitter>
+
+    <emitter type="spot">
+        <transform name="to_world">
+            <!--<lookat origin="5, -10, 5" target="-2, 0, 0"/>-->
+            <lookat origin="5, -10, 5" target="0, 0, 0" up="0, 0, 1"/>
+        </transform>
+        <rgb name="intensity" value="1000, 0, 0"/>
+        <float name="cutoff_angle" value="60"/>
+        <float name="beam_width" value="60"/>
+        <texture name="texture" type="bitmap">
+            <string name="filename" value="data/laser.bmp"/>
+            <!--
+                <string name="wrap_mode" value="mirror"/>
+            -->
+        </texture>
+    </emitter>
+
+</scene>
