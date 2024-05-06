@@ -106,3 +106,27 @@ def knn_point_classification(external, internal, unknown, k=5):
             ret_external.append(u)
 
     return ret_external, ret_internal
+
+
+def rotate_x(angle):
+    return np.array([
+        [1, 0, 0],
+        [0, math.cos(math.radians(angle)), -math.sin(math.radians(angle))],
+        [0, math.sin(math.radians(angle)), math.cos(math.radians(angle))]
+    ])
+
+
+def rotate_y(angle):
+    return np.array([
+        [math.cos(math.radians(angle)), 0, math.sin(math.radians(angle))],
+        [0, 1, 0],
+        [-math.sin(math.radians(angle)), 0, math.cos(math.radians(angle))]
+    ])
+
+
+def rotate_z(angle):
+    return np.array([
+        [math.cos(math.radians(angle)), -math.sin(math.radians(angle)), 0],
+        [math.sin(math.radians(angle)), math.cos(math.radians(angle)), 0],
+        [0, 0, 1]
+    ])
