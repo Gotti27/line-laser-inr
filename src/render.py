@@ -52,9 +52,11 @@ if testing:
     # normalized_depth_map = cv.normalize(depth_map, None, 0, 255, cv.NORM_MINMAX, dtype=cv.CV_16U)
     # cv.imshow("Depth Map", normalized_depth_map)
 
+    # t = np.array([0, 0, 7.])
     t = np.array([0, 2, 7.])
     R = np.eye(3, 3)
     R @= rotate_y(testing_angle)
+    # R @= rotate_x(90)
     R @= rotate_x(20)
 
     camera_position = - np.matrix(R).T @ t
@@ -63,13 +65,13 @@ if testing:
 
     print(np.append(camera_position, [[1]], axis=1))
     laser_center = np.squeeze(np.asarray(camera_position)) @ rotate_y(30)
-    laser_normal = np.array([1, 0, 0]) @ rotate_x(20) @ rotate_y(30)
+    laser_norm = np.array([1, 0, 0]) @ rotate_x(20) @ rotate_y(30)
     print("laser center: ", laser_center)
-    print("laser normal: ", laser_normal)
+    print("laser norm: ", laser_norm)
 
     points = []
     for p in [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 1], [0, 0, 0],
-              (laser_normal + np.array([0, 0, 0.])).tolist()]:
+              (laser_norm + np.array([0, 0, 0.])).tolist()]:
         p.append(1)
         camera_p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ p
         points.append(
@@ -82,7 +84,7 @@ if testing:
     top_z = points[3]
     testing_point = points[4]
     translated_origin = points[5]
-    normal_test = points[6]
+    norm_test = points[6]
 
     cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_x[0])), int(round(top_x[1]))],
             [0, 0, 255], 1)
@@ -95,7 +97,7 @@ if testing:
             [255, 0, 255], 1)
 
     cv.line(render, [int(round(translated_origin[0])), int(round(translated_origin[1]))],
-            [int(round(normal_test[0])), int(round(normal_test[1]))],
+            [int(round(norm_test[0])), int(round(norm_test[1]))],
             [255, 255, 0], 1)
 
     cv.imshow("Render", render[:, :, 0:3])
@@ -105,7 +107,8 @@ if testing:
 
 do_all_renders = False
 if do_all_renders:
-    os.mkdir('renders')
+    if not os.path.exists("renders"):
+        os.mkdir('renders')
     for i in range(360):
         scene = mi.load_file("scenes/gear.xml", angle=i)
         image = mi.render(scene, spp=256)
@@ -125,6 +128,7 @@ height, width, layers = frame.shape
 
 images.sort(key=lambda name: int(name.split('_')[1]))
 
+'''
 positions = images[1::2]
 renders = images[0::2]
 
@@ -134,12 +138,13 @@ for i in range(len(renders)):
         images.append([positions[i], renders[i]])
     else:
         images.append([renders[i], positions[i]])
+'''
 
 for degree, image in enumerate(images):
-    render, position = image
+    render = image  # , position = image
 
     render = cv.imread(os.path.join(image_folder, render), cv.IMREAD_UNCHANGED)
-    position = cv.imread(os.path.join(image_folder, position), cv.IMREAD_UNCHANGED)
+    # position = cv.imread(os.path.join(image_folder, position), cv.IMREAD_UNCHANGED)
 
     red_render = render[:, :, 2] * 255
     _, red_render = cv.threshold(red_render, 100, 255, cv.THRESH_BINARY)
@@ -155,20 +160,20 @@ for degree, image in enumerate(images):
 
     print(np.append(camera_position, [[1]], axis=1))
     laser_center = np.squeeze(np.asarray(camera_position)) @ rotate_y(30)
-    laser_normal = np.array([1, 0, 0]) @ rotate_x(20) @ rotate_y(degree) @ rotate_y(30)
+    laser_norm = np.array([1, 0, 0]) @ rotate_x(20) @ rotate_y(degree) @ rotate_y(30)
     print("laser center: ", laser_center)
-    print("laser normal: ", laser_normal)
+    print("laser norm: ", laser_norm)
 
     with open(f'renders/data_{degree}.pkl', 'wb') as data_output_file:
         pickle.dump(K, data_output_file)
         pickle.dump(R, data_output_file)
         pickle.dump(t, data_output_file)
         pickle.dump(laser_center, data_output_file)
-        pickle.dump(laser_normal, data_output_file)
+        pickle.dump(laser_norm, data_output_file)
 
     points = []
 
-    for p in [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 1], (laser_normal + np.array([0, 0, 0.])).tolist()]:
+    for p in [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 1], (laser_norm + np.array([0, 0, 0.])).tolist()]:
         p.append(1)
         camera_p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ p
 
@@ -180,7 +185,7 @@ for degree, image in enumerate(images):
     top_x = points[1]
     top_y = points[2]
     top_z = points[3]
-    normal_test = points[5]
+    norm_test = points[5]
 
     cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_x[0])), int(round(top_x[1]))],
             [0, 0, 255], 1)
@@ -189,7 +194,7 @@ for degree, image in enumerate(images):
     cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_z[0])), int(round(top_z[1]))],
             [255, 0, 0], 1)
     cv.line(render, [int(round(origin[0])), int(round(origin[1]))],
-            [int(round(normal_test[0])), int(round(normal_test[1]))],
+            [int(round(norm_test[0])), int(round(norm_test[1]))],
             [255, 255, 0], 1)
 
     cv.putText(render, "x", [int(round(top_x[0])), int(round(top_x[1]))], cv.FONT_HERSHEY_SIMPLEX, 0.5, [0, 0, 255], 1)

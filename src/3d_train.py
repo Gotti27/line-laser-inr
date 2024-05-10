@@ -1,4 +1,6 @@
 import argparse
+import os
+import pickle
 import random
 from datetime import datetime
 
@@ -10,9 +12,11 @@ from utils import *
 
 UNIFORM_TRAINING_EPOCHS = 8
 GRADIENT_BASED_TRAINING_EPOCHS = 5
-INTRA_RAY_DEGREES = 1
+# INTRA_RAY_DEGREES = 1
 UNIFORM_BATCH_NUMBER = 50
 GRADIENT_BASED_BATCH_NUMBER = 10
+
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 writer = SummaryWriter('runs/model_trainer_{}'.format(timestamp))
@@ -29,10 +33,9 @@ if debug:
 
 print(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
 
-# import point cloud as tensor
-with open("data/ball.xyz") as point_cloud_file:
-    point_cloud = np.array(
-        [[float(n) for n in line.rstrip().split(" ")] for line in point_cloud_file])  # if random.random() >= 0
+image_folder = 'renders'
+images = [img for img in os.listdir(image_folder) if img.endswith(".exr")]
+images.sort(key=lambda name: int(name.split('_')[1]))
 
 # set up the model
 torch.manual_seed(41)
@@ -41,7 +44,140 @@ torch.set_default_device(device)
 model = INR3D(device=device)
 model.to(device)
 loss_fn = torch.nn.MSELoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.002)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+
+def sample_from_image(image):
+    internal = []
+    external = []
+    unknown = []
+    degree = int(image.split('_')[1])
+    render = cv.imread(os.path.join(image_folder, image), cv.IMREAD_UNCHANGED)
+    red_render = render[:, :, 2] * 255
+    _, red_render = cv.threshold(red_render, 100, 255, cv.THRESH_BINARY)
+
+    with open(f'renders/data_{degree}.pkl', 'rb') as data_input_file:
+        K = pickle.load(data_input_file)
+        R = pickle.load(data_input_file)
+        t = pickle.load(data_input_file)
+        laser_center = pickle.load(data_input_file)
+        laser_norm = pickle.load(data_input_file)
+
+    a, b, c = laser_norm
+    d = -(a * laser_center[0] + b * laser_center[1] + c * laser_center[2])
+
+    camera_position = np.squeeze(np.asarray(- np.matrix(R).T @ t))
+
+    laser_points = []
+    for u in range(red_render.shape[0]):
+        for v in range(red_render.shape[1]):
+            if not red_render[u][v]:
+                continue
+            laser_point_camera = np.array(
+                [v - (red_render.shape[1] / 2), u - (red_render.shape[0] / 2), K[0][0], 1])
+            laser_point_world = np.concatenate([
+                np.concatenate([R.T, np.array(- R.T @ t).reshape(3, 1)], axis=1),
+                np.array([[0, 0, 0, 1]])
+            ], axis=0) @ laser_point_camera
+
+            laser_point_world = [laser_point_world[0] / laser_point_world[3],
+                                 laser_point_world[1] / laser_point_world[3],
+                                 laser_point_world[2] / laser_point_world[3]]
+
+            laser_points.append(np.squeeze(
+                np.asarray(find_plane_line_intersection([a, b, c, d], camera_position, np.array(laser_point_world)))
+            ))
+            break
+
+    for point in laser_points:
+        internal.append(point)
+        if debug:
+            point = np.append(point, [1])  # = np.hstack([point, [[1.]]])
+            p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ point
+            p = [int(round(p[0, 0] / p[0, 2])), int(round(p[0, 1] / p[0, 2]))]
+            cv.drawMarker(render, p, [0, 255, 0], cv.MARKER_TILTED_CROSS, 1, 1)
+
+    for laser_point in laser_points:
+        for _ in range(5):
+            if 45 <= degree + 30 < 135:
+                x = random.uniform(laser_point[0], 3.5)
+                y = laser_point[1]
+                z = -(a * x + b * y + d) / c
+            elif 135 <= degree + 30 < 225:
+                z = random.uniform(laser_point[2], 3.5)
+                y = laser_point[1]
+                x = -(c * z + b * y + d) / a
+            elif 225 <= degree + 30 < 315:
+                x = random.uniform(-3.5, laser_point[0])
+                y = laser_point[1]
+                z = -(a * x + b * y + d) / c
+            else:
+                z = random.uniform(-3.5, laser_point[2])
+                y = laser_point[1]
+                x = -(c * z + b * y + d) / a
+
+            external.append([x, y, z])
+            if debug:
+                p = np.array([x, y, z, 1.])
+                p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ p
+                p = [int(round(p[0, 0] / p[0, 2])), int(round(p[0, 1] / p[0, 2]))]
+                cv.drawMarker(render, p, [255, 255, 0], cv.MARKER_TILTED_CROSS, 2, 1)
+
+        for _ in range(5):
+            if 45 <= degree + 30 < 135:
+                x = random.uniform(-3.5, laser_point[0])
+                y = laser_point[1]
+                z = -(a * x + b * y + d) / c
+            elif 135 <= degree + 30 < 225:
+                z = random.uniform(-3.5, laser_point[2])
+                y = laser_point[1]
+                x = -(c * z + b * y + d) / a
+            elif 225 <= degree + 30 < 315:
+                x = random.uniform(laser_point[0], 3.5)
+                y = laser_point[1]
+                z = -(a * x + b * y + d) / c
+            else:
+                z = random.uniform(laser_point[2], 3.5)
+                y = laser_point[1]
+                x = -(c * z + b * y + d) / a
+
+            unknown.append([x, y, z])
+            if debug:
+                p = np.array([x, y, z, 1.])
+                p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ p
+                p = [int(round(p[0, 0] / p[0, 2])), int(round(p[0, 1] / p[0, 2]))]
+                cv.drawMarker(render, p, [255, 0, 255], cv.MARKER_TILTED_CROSS, 2, 1)
+
+    if debug:
+        laser_points = []
+        for p in [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 1], (laser_norm + np.array([0, 0, 0.])).tolist()]:
+            p.append(1)
+            camera_p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ p
+
+            laser_points.append(
+                [camera_p[0, 0] / camera_p[0, 2], camera_p[0, 1] / camera_p[0, 2]]
+            )
+
+        origin = laser_points[0]
+        top_x = laser_points[1]
+        top_y = laser_points[2]
+        top_z = laser_points[3]
+        norm_test = laser_points[5]
+
+        cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_x[0])), int(round(top_x[1]))],
+                [0, 0, 255], 1)
+        cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_y[0])), int(round(top_y[1]))],
+                [0, 255, 0], 1)
+        cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_z[0])), int(round(top_z[1]))],
+                [255, 0, 0], 1)
+        cv.line(render, [int(round(origin[0])), int(round(origin[1]))],
+                [int(round(norm_test[0])), int(round(norm_test[1]))],
+                [0, 255, 255], 1)
+
+        cv.imshow('foo', render)
+        cv.waitKey(1)
+
+    return external, internal, unknown
 
 
 def train_one_epoch(epoch_index, tb_writer):
@@ -54,33 +190,29 @@ def train_one_epoch(epoch_index, tb_writer):
         unknown = []
 
         inputs = np.array([]).reshape(0, 3)
-        for z in range(5, 70):
-            center = [0, 0]
-            point_level = list(filter(lambda p: round(p[2]) == z, point_cloud))
-            level_points = random.sample(point_level, 100 if len(point_level) > 100 else len(point_level))
 
-            external.extend(level_points)
+        ##
 
-            for second in level_points:
-                radius, angle = convert_cartesian_to_polar(center=center, point=second)
+        for image in images:
+            e, i, u = sample_from_image(image)
+            external.extend(e)
+            internal.extend(i)
+            unknown.extend(u)
 
-                e_x, e_y = convert_polar_to_cartesian(angle, radius + random.randint(0, 30), center)
-                i_x, i_y = convert_polar_to_cartesian(angle, random.randint(0, round(radius)), center)
-                external.append([e_x, e_y, z])
-                internal.append([i_x, i_y, z])
-            # print(external)
-            # print(internal)
-            '''
-            e, inner, u = generate_laser_points(start_point, angle)
-            external.extend(random.sample(e, 40 if len(e) > 40 else len(e)))
-            internal.extend(random.sample(inner, 10 if len(inner) > 10 else len(inner)))
-            unknown.extend(random.sample(u, 40 if len(u) > 40 else len(u)))
-            '''
+        ##
 
-        # external, internal = knn_point_classification(external, internal, unknown, 5)
+        external, internal = knn_point_classification(external, internal, unknown, 5)
 
-        inputs = np.concatenate((inputs, external), axis=0)
-        inputs = np.concatenate((inputs, internal), axis=0)
+        '''
+        if debug:
+            point_cloud = pv.PolyData([[p_p * 10 for p_p in p] for p in internal])
+            point_cloud.plot(eye_dome_lighting=True)
+            point_cloud = pv.PolyData([[p_p * 10 for p_p in p] for p in external])
+            point_cloud.plot(eye_dome_lighting=True)
+        '''
+
+        inputs = np.concatenate((inputs, [[p_p * 10 for p_p in p] for p in external]), axis=0)
+        inputs = np.concatenate((inputs, [[p_p * 10 for p_p in p] for p in internal]), axis=0)
 
         labels = torch.tensor([[1] for _ in external] + [[-1] for _ in internal], dtype=torch.float32,
                               requires_grad=True, device=device)
