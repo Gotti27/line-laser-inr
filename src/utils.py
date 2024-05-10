@@ -130,3 +130,24 @@ def rotate_z(angle):
         [math.sin(math.radians(angle)), math.cos(math.radians(angle)), 0],
         [0, 0, 1]
     ])
+
+
+def find_plane_line_intersection(plane, point1, point2):
+    """
+    Find intersection between a plane and the line passing through two points
+    :param plane:
+    :param point1:
+    :param point2:
+    :return:
+    """
+    direction = point2 - point1
+    plane_norm = np.array([plane[0], plane[1], plane[2]])
+    product = plane_norm @ direction
+    if abs(product) > 1e-6:
+        p_co = plane_norm * (-plane[3] / (plane_norm @ plane_norm))
+
+        w = point1 - p_co
+        fac = - (plane_norm @ w) / product
+        return point1 + (direction * fac)
+
+    return None
