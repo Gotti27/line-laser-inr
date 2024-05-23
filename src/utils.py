@@ -151,3 +151,9 @@ def find_plane_line_intersection(plane, point1, point2):
         return point1 + (direction * fac)
 
     return None
+
+
+def project_point(point, R, t, K):
+    point.append(1)
+    camera_p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ point
+    return [camera_p[0, 0] / camera_p[0, 2], camera_p[0, 1] / camera_p[0, 2]]
