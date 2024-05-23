@@ -153,6 +153,29 @@ def find_plane_line_intersection(plane, point1, point2):
     return None
 
 
+def find_line_equation(x1, y1, x2, y2):
+    """
+    Find the equation of the line passing through two points
+    :param x1:
+    :param y1:
+    :param x2:
+    :param y2:
+    :return: the line params in the form a, b, c
+    """
+    if x2 - x1 == 0:
+        a = 1
+        b = 0
+        c = -x1
+    else:
+        m = (y2 - y1) / (x2 - x1)
+        a = -m
+        b = 1
+        c = m * x1 - y1
+
+    return a, b, c
+
+
+
 def project_point(point, R, t, K):
     point.append(1)
     camera_p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ point
