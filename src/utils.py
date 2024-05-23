@@ -175,6 +175,36 @@ def find_line_equation(x1, y1, x2, y2):
     return a, b, c
 
 
+def bresenham(x0, y0, x1, y1):
+    dx = abs(x1 - x0)
+    dy = abs(y1 - y0)
+    steep = dy > dx
+
+    if steep:
+        x0, y0 = y0, x0
+        x1, y1 = y1, x1
+
+    if x0 > x1:
+        x0, x1 = x1, x0
+        y0, y1 = y1, y0
+
+    dx = x1 - x0
+    dy = abs(y1 - y0)
+    error = dx / 2
+    y_step = 1 if y0 < y1 else -1
+    y = y0
+
+    for x in range(x0, x1 + 1):
+        if steep:
+            yield y, x
+        else:
+            yield x, y
+
+        error -= dy
+        if error < 0:
+            y += y_step
+            error += dx
+
 
 def project_point(point, R, t, K):
     point.append(1)
