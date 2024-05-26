@@ -1,4 +1,5 @@
 import math
+import random
 
 import cv2 as cv
 import numpy as np
@@ -239,3 +240,26 @@ def project_point(point, R, t, K):
     point.append(1)
     camera_p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ point
     return [camera_p[0, 0] / camera_p[0, 2], camera_p[0, 1] / camera_p[0, 2]]
+
+
+def sample_point_from_plane(plane, degree_threshold):
+    a, b, c, d = plane
+
+    if 45 <= degree_threshold < 135:
+        x = random.uniform(-3, 3)
+        y = random.uniform(-3, 0)
+        z = -(a * x + b * y + d) / c
+    elif 135 <= degree_threshold < 225:
+        z = random.uniform(-3, 3)
+        y = random.uniform(-3, 0)
+        x = -(c * z + b * y + d) / a
+    elif 225 <= degree_threshold < 315:
+        x = random.uniform(-3, 3)
+        y = random.uniform(-3, 0)
+        z = -(a * x + b * y + d) / c
+    else:
+        z = random.uniform(-3, 3)
+        y = random.uniform(-3, 0)
+        x = -(c * z + b * y + d) / a
+
+    return [x, y, z]
