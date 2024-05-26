@@ -1,16 +1,17 @@
 import argparse
 import os
 import pickle
-import random
 from datetime import datetime
 
+import cv2
+import pyvista as pv
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from inr_model import INR3D
 from utils import *
 
-UNIFORM_TRAINING_EPOCHS = 8
+UNIFORM_TRAINING_EPOCHS = 7
 GRADIENT_BASED_TRAINING_EPOCHS = 5
 # INTRA_RAY_DEGREES = 1
 UNIFORM_BATCH_NUMBER = 50
@@ -96,6 +97,11 @@ def sample_from_image(image):
             p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ point
             p = [int(round(p[0, 0] / p[0, 2])), int(round(p[0, 1] / p[0, 2]))]
             cv.drawMarker(render, p, [0, 255, 0], cv.MARKER_TILTED_CROSS, 1, 1)
+
+            p_laser_center = laser_center @ rotate_y(0)
+            p_laser_center = project_point(p_laser_center, R, t, K)
+
+            cv.line(render, p_laser_center, p, [0, 255, 0], 2)
 
     for laser_point in laser_points:
         for _ in range(5):
@@ -330,25 +336,38 @@ def train_one_epoch(epoch_index, tb_writer):
 
         inputs = np.array([]).reshape(0, 3)
 
-        ##
+        for point in [[random.uniform(-3, 3), random.uniform(-3, 0), random.uniform(-3, 3)] for _ in
+                      range(100)]:
+            label = silhouette_sampling(point)
+            if label == 1:
+                external.append(point)
+            else:
+                unknown.append(point)
 
-        for image in images:
-            e, i, u = sample_from_image(image)
-            external.extend(e)
-            internal.extend(i)
-            unknown.extend(u)
+        sampling_list = images.copy()
+        for _ in range(360 * 2):
+            image = random.sample(sampling_list, 1)[0]
+            for point, label in laser_ray_sampling(image):
+                if label == 1:
+                    external.append(point)
+                elif label == 0:
+                    unknown.append(point)
+                else:
+                    internal.append(point)
 
-        ##
+        if debug:
+            point_cloud = pv.PolyData([[p_p * 10 for p_p in p] for p in unknown])
+            point_cloud.plot(eye_dome_lighting=True)
+            point_cloud = pv.PolyData([[p_p * 10 for p_p in p] for p in external])
+            point_cloud.plot(eye_dome_lighting=True)
 
         external, internal = knn_point_classification(external, internal, unknown, 5)
 
-        '''
         if debug:
             point_cloud = pv.PolyData([[p_p * 10 for p_p in p] for p in internal])
             point_cloud.plot(eye_dome_lighting=True)
             point_cloud = pv.PolyData([[p_p * 10 for p_p in p] for p in external])
             point_cloud.plot(eye_dome_lighting=True)
-        '''
 
         inputs = np.concatenate((inputs, [[p_p * 10 for p_p in p] for p in external]), axis=0)
         inputs = np.concatenate((inputs, [[p_p * 10 for p_p in p] for p in internal]), axis=0)
