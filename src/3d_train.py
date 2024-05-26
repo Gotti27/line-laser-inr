@@ -180,6 +180,33 @@ def sample_from_image(image):
     return external, internal, unknown
 
 
+def silhouette_sampling(point):
+    x, y, z = point
+    for image in list(filter(lambda img: 'right' in img, images)):
+        degree = image.split('_')[1]
+        side = image.split('_')[2]
+        with open(f'renders/data_{degree}_{side}.pkl', 'rb') as data_input_file:
+            K = pickle.load(data_input_file)
+            R = pickle.load(data_input_file)
+            t = pickle.load(data_input_file)
+
+        p = np.array([x, y, z, 1.])
+        p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ p
+        p = [int(round(p[0, 0] / p[0, 2])), int(round(p[0, 1] / p[0, 2]))]
+        render_depth = cv.imread(os.path.join(image_folder, image), cv.IMREAD_UNCHANGED)
+        render = np.array(render_depth[:, :, 0:3])
+        depth = render_depth[:, :, 3]
+        if debug:
+            cv.drawMarker(render, p, [0, 255, 0], cv.MARKER_CROSS, 2, 1)
+            cv.imshow('foobar', render)
+            cv.waitKey(1)
+
+        is_outside = p[0] < 0 or p[0] >= 256 or p[1] < 0 or p[1] >= 256
+
+        if is_outside or depth[p[1], p[0]] == 0:
+            return 1
+    return -1
+
 def train_one_epoch(epoch_index, tb_writer):
     running_loss = 0.
     last_loss = 0.
