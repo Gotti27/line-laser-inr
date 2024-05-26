@@ -239,7 +239,7 @@ def bresenham(x0, y0, x1, y1):
 def project_point(point, R, t, K):
     point.append(1)
     camera_p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ point
-    return [camera_p[0, 0] / camera_p[0, 2], camera_p[0, 1] / camera_p[0, 2]]
+    return [int(round(camera_p[0, 0] / camera_p[0, 2])), int(round(camera_p[0, 1] / camera_p[0, 2]))]
 
 
 def sample_point_from_plane(plane, degree_threshold):
