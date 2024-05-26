@@ -108,6 +108,35 @@ def knn_point_classification(external, internal, unknown, k=5):
     return ret_external, ret_internal
 
 
+def pure_knn_point_classification(external, internal, unknown, k=5):
+    # in pure knn internal list should be empty
+    ret_external = [] + external
+    ret_internal = [] + internal
+    all_points = [] + external + internal + unknown
+    kd_tree = spatial.KDTree(all_points)
+    _, neighbors = kd_tree.query(unknown, k=k)
+
+    all_labels = [1 for _ in external] + [-1 for _ in internal] + [0 for _ in unknown]
+    for i, u in enumerate(unknown):
+        point_neighbors = neighbors[i]
+        if k == 1:
+            point_class = [all_labels[point_neighbors]]
+        else:
+            point_class = [all_labels[n] for n in point_neighbors]
+
+        internal_score = len([p for p in point_class if p == -1])
+        external_score = len([p for p in point_class if p == 1])
+        unknown_score = len([p for p in point_class if p == 0])
+
+        # FIXME: this condition has to be refactored
+        if unknown_score > external_score or internal_score > unknown_score:
+            ret_internal.append(u)
+        else:
+            ret_external.append(u)
+
+    return ret_external, ret_internal
+
+
 def rotate_x(angle):
     return np.array([
         [1, 0, 0],
