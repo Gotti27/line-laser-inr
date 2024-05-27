@@ -15,15 +15,15 @@ loss_fn = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 model.load_state_dict(torch.load('3d-model', map_location=device))
 
-x = torch.linspace(-35, 35, 100)
-y = torch.linspace(-32, -3, 50)
-z = torch.linspace(-35, 35, 100)
+x = torch.linspace(-30, 30, 80)
+y = torch.linspace(-30, 0, 40)
+z = torch.linspace(-30, 30, 80)
 X, Y, Z = torch.meshgrid(x, y, z)
 
 points = torch.stack((X.flatten(), Y.flatten(), Z.flatten()), dim=-1)
 
 with torch.no_grad():
-    densities = np.array(model(points).reshape(100, 50, 100))
+    densities = np.array(model(points).reshape(80, 40, 80))
 
 verts, faces, normals, values = measure.marching_cubes(densities)
 

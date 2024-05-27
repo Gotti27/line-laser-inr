@@ -31,3 +31,4 @@ matplotlib~=3.8.4
 scikit-image~=0.23.1
 mitsuba~=3.5.0
 drjit~=0.4.4
+pyvista~=0.43.7

@@ -38,8 +38,22 @@
         </bsdf>
         <transform name="to_world">
             <rotate x="1" angle="-90"/>
+            <scale value="0.8"/>
         </transform>
     </shape>
+
+    <!--
+    <shape type="obj" id="floor">
+        <string name="filename" value="meshes/cbox_floor.obj"/>
+        <bsdf type="diffuse">
+            <rgb name="reflectance" value="1 1 1"/>
+        </bsdf>
+        <transform name="to_world">
+            <translate y="1.0"/>
+            <scale value="100"/>
+        </transform>
+    </shape>
+    -->
 
     <emitter type="point" id="light1">
         <!-- <point name="position" x="3" y="0" z="-10"/> -->

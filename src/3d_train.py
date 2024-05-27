@@ -1,16 +1,17 @@
 import argparse
 import os
 import pickle
-import random
 from datetime import datetime
 
+import cv2
+import pyvista as pv
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from inr_model import INR3D
 from utils import *
 
-UNIFORM_TRAINING_EPOCHS = 8
+UNIFORM_TRAINING_EPOCHS = 7
 GRADIENT_BASED_TRAINING_EPOCHS = 5
 # INTRA_RAY_DEGREES = 1
 UNIFORM_BATCH_NUMBER = 50
@@ -97,6 +98,11 @@ def sample_from_image(image):
             p = [int(round(p[0, 0] / p[0, 2])), int(round(p[0, 1] / p[0, 2]))]
             cv.drawMarker(render, p, [0, 255, 0], cv.MARKER_TILTED_CROSS, 1, 1)
 
+            p_laser_center = laser_center @ rotate_y(0)
+            p_laser_center = project_point(p_laser_center, R, t, K)
+
+            cv.line(render, p_laser_center, p, [0, 255, 0], 2)
+
     for laser_point in laser_points:
         for _ in range(5):
             if 45 <= degree + 30 < 135:
@@ -180,6 +186,145 @@ def sample_from_image(image):
     return external, internal, unknown
 
 
+def silhouette_sampling(point):
+    x, y, z = point
+    for image in list(filter(lambda img: 'right' in img, images)):
+        degree = image.split('_')[1]
+        side = image.split('_')[2]
+        with open(f'renders/data_{degree}_{side}.pkl', 'rb') as data_input_file:
+            K = pickle.load(data_input_file)
+            R = pickle.load(data_input_file)
+            t = pickle.load(data_input_file)
+
+        p = np.array([x, y, z, 1.])
+        p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ p
+        p = [int(round(p[0, 0] / p[0, 2])), int(round(p[0, 1] / p[0, 2]))]
+        render_depth = cv.imread(os.path.join(image_folder, image), cv.IMREAD_UNCHANGED)
+        render = np.array(render_depth[:, :, 0:3])
+        depth = render_depth[:, :, 3]
+        if debug:
+            cv.drawMarker(render, p, [0, 255, 0], cv.MARKER_CROSS, 2, 1)
+            cv.imshow('foobar', render)
+            cv.waitKey(1)
+
+        is_outside = p[0] < 0 or p[0] >= 256 or p[1] < 0 or p[1] >= 256
+
+        if is_outside or depth[p[1], p[0]] == 0:
+            return 1
+    return -1
+
+
+def laser_ray_sampling(image):
+    points = []
+    degree = int(image.split('_')[1])
+    side = image.split('_')[2]
+    with open(f'renders/data_{degree}_{side}.pkl',
+              'rb') as data_input_file:
+        K = pickle.load(data_input_file)
+        R = pickle.load(data_input_file)
+        t = pickle.load(data_input_file)
+        laser_center = pickle.load(data_input_file)
+        laser_norm = pickle.load(data_input_file)
+
+    a, b, c = laser_norm
+    d = -(a * laser_center[0] + b * laser_center[1] + c * laser_center[2])
+
+    render = np.array(cv.imread(os.path.join(image_folder, image), cv.IMREAD_UNCHANGED)[:, :, 0:3])
+    red_channel = render[:, :, 2] * 255
+    _, red_channel = cv.threshold(red_channel, 100, 255, cv.THRESH_BINARY)
+
+    camera_position = np.squeeze(np.asarray(- np.matrix(R).T @ t))
+    point_cloud_e = [laser_center, camera_position]
+    point_cloud_u = []  # [laser_center, camera_position]
+
+    for u in range(red_channel.shape[0]):
+        for v in range(red_channel.shape[1]):
+            if not red_channel[u][v]:
+                continue
+
+            laser_point_camera = np.array(
+                [v - (red_channel.shape[1] / 2), u - (red_channel.shape[0] / 2), K[0][0], 1])
+            laser_point_world = np.concatenate([
+                np.concatenate([R.T, np.array(- R.T @ t).reshape(3, 1)], axis=1),
+                np.array([[0, 0, 0, 1]])
+            ], axis=0) @ laser_point_camera
+
+            laser_point_world = [laser_point_world[0] / laser_point_world[3],
+                                 laser_point_world[1] / laser_point_world[3],
+                                 laser_point_world[2] / laser_point_world[3]]
+
+            points.append([np.squeeze(
+                np.asarray(find_plane_line_intersection([a, b, c, d], camera_position, np.array(laser_point_world)))
+            ), -1])
+            break
+
+    for _ in range(100):
+        if side == 'right':
+            x, y, z = sample_point_from_plane([a, b, c, d], degree + 30)
+        else:
+            x, y, z = sample_point_from_plane([a, b, c, d], degree - 30)
+
+        p = project_point([x, y, z], R, t, K)
+        p_laser_center = project_point([laser_center[0], laser_center[1], laser_center[2]], R, t, K)
+
+        '''
+        direction = -laser_center[1] / (y - laser_center[1])
+        far_point = (
+            laser_center[0] + direction * (x - laser_center[0]), 0, laser_center[2] + direction * (z - laser_center[2]))
+
+        p_far_point = np.array([far_point[0], far_point[1], far_point[2], 1.])
+        p_far_point = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ p_far_point
+        p_far_point = [int(round(p_far_point[0, 0] / p_far_point[0, 2])),
+                       int(round(p_far_point[0, 1] / p_far_point[0, 2]))]
+        '''
+
+        p_far_point = [int(round(i)) for i in np.array(p_laser_center) + 2 * (np.array(p) - np.array(p_laser_center))]
+
+        line_points = [line_point for line_point in bresenham(p_far_point[0], p_far_point[1], p[0], p[1])]
+        if side == 'right':
+            line_points.reverse()
+
+        unknown = True
+        for point in line_points:
+            if 0 < point[1] < 256 and 0 < point[0] < 256 and red_channel[point[1], point[0]] > 200:
+                unknown = False
+                break
+
+        if not unknown:
+            for point in line_points:
+                if 0 < point[1] < 256 and 0 < point[0] < 256:
+                    render[point[1], point[0]] = [0, 255, 0]
+                    if red_channel[point[1], point[0]] > 200:
+                        break
+
+        if debug:
+            cv.drawMarker(render, p_far_point, [255, 255, 0], cv2.MARKER_DIAMOND, 2, 1)
+            cv.drawMarker(render, p, [0, 0, 255], cv.MARKER_CROSS, 2, 2)
+            cv.imshow('red', red_channel)
+            cv.imshow('foobar', render)
+            cv.waitKey(1)
+
+        if unknown:
+            points.append([[x, y, z], 0])
+            point_cloud_u.append([x, y, z])
+        else:
+            points.append([[x, y, z], 1])
+            point_cloud_e.append([x, y, z])
+
+    if debug:
+        mesh = pv.read('scenes/meshes/teapot.ply')
+        mesh.rotate_x(90, inplace=True)
+        mesh.rotate_y(180, inplace=True)
+        point_cloud_u.extend(mesh.points)
+        point_cloud_e.extend(mesh.points)
+        point_cloud_e = pv.PolyData([[p_p * 10 for p_p in p] for p in point_cloud_e])
+        point_cloud_u = pv.PolyData([[p_p * 10 for p_p in p] for p in point_cloud_u])
+        point_cloud_e.plot(eye_dome_lighting=True)
+        point_cloud_u.plot(eye_dome_lighting=True)
+
+    return points
+
+
 def train_one_epoch(epoch_index, tb_writer):
     running_loss = 0.
     last_loss = 0.
@@ -191,25 +336,38 @@ def train_one_epoch(epoch_index, tb_writer):
 
         inputs = np.array([]).reshape(0, 3)
 
-        ##
+        for point in [[random.uniform(-3, 3), random.uniform(-3, 0), random.uniform(-3, 3)] for _ in
+                      range(100)]:
+            label = silhouette_sampling(point)
+            if label == 1:
+                external.append(point)
+            else:
+                unknown.append(point)
 
-        for image in images:
-            e, i, u = sample_from_image(image)
-            external.extend(e)
-            internal.extend(i)
-            unknown.extend(u)
+        sampling_list = images.copy()
+        for _ in range(360 * 2):
+            image = random.sample(sampling_list, 1)[0]
+            for point, label in laser_ray_sampling(image):
+                if label == 1:
+                    external.append(point)
+                elif label == 0:
+                    unknown.append(point)
+                else:
+                    internal.append(point)
 
-        ##
+        if debug:
+            point_cloud = pv.PolyData([[p_p * 10 for p_p in p] for p in unknown])
+            point_cloud.plot(eye_dome_lighting=True)
+            point_cloud = pv.PolyData([[p_p * 10 for p_p in p] for p in external])
+            point_cloud.plot(eye_dome_lighting=True)
 
         external, internal = knn_point_classification(external, internal, unknown, 5)
 
-        '''
         if debug:
             point_cloud = pv.PolyData([[p_p * 10 for p_p in p] for p in internal])
             point_cloud.plot(eye_dome_lighting=True)
             point_cloud = pv.PolyData([[p_p * 10 for p_p in p] for p in external])
             point_cloud.plot(eye_dome_lighting=True)
-        '''
 
         inputs = np.concatenate((inputs, [[p_p * 10 for p_p in p] for p in external]), axis=0)
         inputs = np.concatenate((inputs, [[p_p * 10 for p_p in p] for p in internal]), axis=0)

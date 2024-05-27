@@ -1,4 +1,5 @@
 import math
+import random
 
 import cv2 as cv
 import numpy as np
@@ -108,6 +109,35 @@ def knn_point_classification(external, internal, unknown, k=5):
     return ret_external, ret_internal
 
 
+def pure_knn_point_classification(external, internal, unknown, k=5):
+    # in pure knn internal list should be empty
+    ret_external = [] + external
+    ret_internal = [] + internal
+    all_points = [] + external + internal + unknown
+    kd_tree = spatial.KDTree(all_points)
+    _, neighbors = kd_tree.query(unknown, k=k)
+
+    all_labels = [1 for _ in external] + [-1 for _ in internal] + [0 for _ in unknown]
+    for i, u in enumerate(unknown):
+        point_neighbors = neighbors[i]
+        if k == 1:
+            point_class = [all_labels[point_neighbors]]
+        else:
+            point_class = [all_labels[n] for n in point_neighbors]
+
+        internal_score = len([p for p in point_class if p == -1])
+        external_score = len([p for p in point_class if p == 1])
+        unknown_score = len([p for p in point_class if p == 0])
+
+        # FIXME: this condition has to be refactored
+        if unknown_score > external_score or internal_score > unknown_score:
+            ret_internal.append(u)
+        else:
+            ret_external.append(u)
+
+    return ret_external, ret_internal
+
+
 def rotate_x(angle):
     return np.array([
         [1, 0, 0],
@@ -151,3 +181,85 @@ def find_plane_line_intersection(plane, point1, point2):
         return point1 + (direction * fac)
 
     return None
+
+
+def find_line_equation(x1, y1, x2, y2):
+    """
+    Find the equation of the line passing through two points
+    :param x1:
+    :param y1:
+    :param x2:
+    :param y2:
+    :return: the line params in the form a, b, c
+    """
+    if x2 - x1 == 0:
+        a = 1
+        b = 0
+        c = -x1
+    else:
+        m = (y2 - y1) / (x2 - x1)
+        a = -m
+        b = 1
+        c = m * x1 - y1
+
+    return a, b, c
+
+
+def bresenham(x0, y0, x1, y1):
+    dx = abs(x1 - x0)
+    dy = abs(y1 - y0)
+    steep = dy > dx
+
+    if steep:
+        x0, y0 = y0, x0
+        x1, y1 = y1, x1
+
+    if x0 > x1:
+        x0, x1 = x1, x0
+        y0, y1 = y1, y0
+
+    dx = x1 - x0
+    dy = abs(y1 - y0)
+    error = dx / 2
+    y_step = 1 if y0 < y1 else -1
+    y = y0
+
+    for x in range(x0, x1 + 1):
+        if steep:
+            yield y, x
+        else:
+            yield x, y
+
+        error -= dy
+        if error < 0:
+            y += y_step
+            error += dx
+
+
+def project_point(point, R, t, K):
+    point.append(1)
+    camera_p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ point
+    return [int(round(camera_p[0, 0] / camera_p[0, 2])), int(round(camera_p[0, 1] / camera_p[0, 2]))]
+
+
+def sample_point_from_plane(plane, degree_threshold):
+    a, b, c, d = plane
+
+    if 45 <= degree_threshold < 135:
+        x = random.uniform(-3, 3)
+        y = random.uniform(-3, 0)
+        z = -(a * x + b * y + d) / c
+    elif 135 <= degree_threshold < 225:
+        z = random.uniform(-3, 3)
+        y = random.uniform(-3, 0)
+        x = -(c * z + b * y + d) / a
+    elif 225 <= degree_threshold < 315:
+        x = random.uniform(-3, 3)
+        y = random.uniform(-3, 0)
+        z = -(a * x + b * y + d) / c
+    else:
+        z = random.uniform(-3, 3)
+        y = random.uniform(-3, 0)
+        x = -(c * z + b * y + d) / a
+
+    return [x, y, z]
