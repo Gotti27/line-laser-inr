@@ -242,24 +242,25 @@ def project_point(point, R, t, K):
     return [int(round(camera_p[0, 0] / camera_p[0, 2])), int(round(camera_p[0, 1] / camera_p[0, 2]))]
 
 
-def sample_point_from_plane(plane, degree_threshold):
+def sample_point_from_plane(plane, degree_threshold, side):
     a, b, c, d = plane
+
+    if side == 'right':
+        y = random.uniform(-3, -1)
+    else:
+        y = random.uniform(-2, 0)
 
     if 45 <= degree_threshold < 135:
         x = random.uniform(-3, 3)
-        y = random.uniform(-3, 0)
         z = -(a * x + b * y + d) / c
     elif 135 <= degree_threshold < 225:
         z = random.uniform(-3, 3)
-        y = random.uniform(-3, 0)
         x = -(c * z + b * y + d) / a
     elif 225 <= degree_threshold < 315:
         x = random.uniform(-3, 3)
-        y = random.uniform(-3, 0)
         z = -(a * x + b * y + d) / c
     else:
         z = random.uniform(-3, 3)
-        y = random.uniform(-3, 0)
         x = -(c * z + b * y + d) / a
 
     return [x, y, z]
