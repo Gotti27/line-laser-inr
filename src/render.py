@@ -69,14 +69,8 @@ if testing:
     print("laser center: ", laser_center)
     print("laser norm: ", laser_norm)
 
-    points = []
-    for p in [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 1], [0, 0, 0],
-              (laser_norm + np.array([0, 0, 0.])).tolist()]:
-        p.append(1)
-        camera_p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ p
-        points.append(
-            [camera_p[0, 0] / camera_p[0, 2], camera_p[0, 1] / camera_p[0, 2]]
-        )
+    points = [project_point(p, R, t, K) for p in [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 1], [0, 0, 0],
+                                                  (laser_norm + np.array([0, 0, 0.])).tolist()]]
 
     origin = points[0]
     top_x = points[1]

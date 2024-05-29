@@ -236,9 +236,10 @@ def bresenham(x0, y0, x1, y1):
             error += dx
 
 
-def project_point(point, R, t, K):
+def project_point(point, rotation_matrix, translation_vector, camera_intrinsic_matrix):
     point.append(1)
-    camera_p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ point
+    camera_p = camera_intrinsic_matrix @ np.concatenate([rotation_matrix, np.matrix(translation_vector).T],
+                                                        axis=1) @ point
     return [int(round(camera_p[0, 0] / camera_p[0, 2])), int(round(camera_p[0, 1] / camera_p[0, 2]))]
 
 
