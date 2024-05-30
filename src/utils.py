@@ -247,9 +247,9 @@ def sample_point_from_plane(plane, degree_threshold, side):
     a, b, c, d = plane
 
     if side == 'right':
-        y = random.uniform(-3, -1)
+        y = random.uniform(-3, 0)
     else:
-        y = random.uniform(-2, 0)
+        y = random.uniform(-3, 0)  # TODO: update this to use different ranges given the side
 
     if 45 <= degree_threshold < 135:
         x = random.uniform(-3, 3)
