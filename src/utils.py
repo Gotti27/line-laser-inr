@@ -236,30 +236,32 @@ def bresenham(x0, y0, x1, y1):
             error += dx
 
 
-def project_point(point, R, t, K):
+def project_point(point, rotation_matrix, translation_vector, camera_intrinsic_matrix):
     point.append(1)
-    camera_p = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ point
+    camera_p = camera_intrinsic_matrix @ np.concatenate([rotation_matrix, np.matrix(translation_vector).T],
+                                                        axis=1) @ point
     return [int(round(camera_p[0, 0] / camera_p[0, 2])), int(round(camera_p[0, 1] / camera_p[0, 2]))]
 
 
-def sample_point_from_plane(plane, degree_threshold):
+def sample_point_from_plane(plane, degree_threshold, side):
     a, b, c, d = plane
+
+    if side == 'right':
+        y = random.uniform(-3, 0)
+    else:
+        y = random.uniform(-3, 0)  # TODO: update this to use different ranges given the side
 
     if 45 <= degree_threshold < 135:
         x = random.uniform(-3, 3)
-        y = random.uniform(-3, 0)
         z = -(a * x + b * y + d) / c
     elif 135 <= degree_threshold < 225:
         z = random.uniform(-3, 3)
-        y = random.uniform(-3, 0)
         x = -(c * z + b * y + d) / a
     elif 225 <= degree_threshold < 315:
         x = random.uniform(-3, 3)
-        y = random.uniform(-3, 0)
         z = -(a * x + b * y + d) / c
     else:
         z = random.uniform(-3, 3)
-        y = random.uniform(-3, 0)
         x = -(c * z + b * y + d) / a
 
     return [x, y, z]

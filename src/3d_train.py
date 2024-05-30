@@ -259,10 +259,7 @@ def laser_ray_sampling(image):
             break
 
     for _ in range(100):
-        if side == 'right':
-            x, y, z = sample_point_from_plane([a, b, c, d], degree + 30)
-        else:
-            x, y, z = sample_point_from_plane([a, b, c, d], degree - 30)
+        x, y, z = sample_point_from_plane([a, b, c, d], degree + (30 if side == 'right' else - 30), side)
 
         p = project_point([x, y, z], R, t, K)
         p_laser_center = project_point([laser_center[0], laser_center[1], laser_center[2]], R, t, K)
