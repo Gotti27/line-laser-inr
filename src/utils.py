@@ -3,7 +3,10 @@ import random
 
 import cv2 as cv
 import numpy as np
+import torch
+from matplotlib import pyplot as plt
 from scipy import spatial
+from scipy.stats.contingency import margins
 
 
 def gear(angle):
@@ -265,3 +268,255 @@ def sample_point_from_plane(plane, degree_threshold, side):
         x = -(c * z + b * y + d) / a
 
     return [x, y, z]
+
+
+def inverse_cdf(p, x, cdf):
+    return x[np.searchsorted(cdf, p)]
+
+
+def closest(lst, k):
+    return (torch.abs(lst - k)).argmin()
+
+
+def sample_point_from_plane_gradient(plane, degree_threshold, side, gradient_image, k=100):
+    a, b, c, d = plane
+
+    points = []
+    _, y_distribution, _ = margins(gradient_image[:, :, :])
+
+    for _ in range(k):
+        y = y_distribution.flatten()
+        y /= np.sum(y)
+        cdf = np.cumsum(y)
+
+        probabilities_to_invert = np.random.uniform(0, 1, 1)
+        y = closest(torch.linspace(-30, 0, 50),
+                    [inverse_cdf(p, torch.linspace(-30, 0, 50), cdf) for p in probabilities_to_invert][0])
+
+        if 45 <= degree_threshold < 135:
+            x_distribution, _ = margins(gradient_image[:, y, :])
+            x = x_distribution.flatten()
+            x /= np.sum(x)
+            cdf = np.cumsum(x)
+            probabilities_to_invert = np.random.uniform(0, 1, 1)
+            x = closest(torch.linspace(-30, 30, 100),
+                        [inverse_cdf(p, torch.linspace(-30, 30, 100), cdf) for p in probabilities_to_invert][0])
+
+            z = -(a * torch.linspace(-30, 30, 100)[x] + b * torch.linspace(-30, 0, 50)[y] + d) / c
+            points.append(
+                [torch.linspace(-30, 30, 100)[x].item(), torch.linspace(-30, 0, 50)[y].item(), z.item()])
+
+            y_distribution, _ = margins(gradient_image[x, :, :])
+
+        elif 135 <= degree_threshold < 225:
+            _, z_distribution = margins(gradient_image[:, y, :])
+            z = z_distribution.flatten()
+            z /= np.sum(z)
+            cdf = np.cumsum(z)
+            probabilities_to_invert = np.random.uniform(0, 1, 1)
+            z = closest(torch.linspace(-30, 30, 100),
+                        [inverse_cdf(p, torch.linspace(-30, 30, 100), cdf) for p in probabilities_to_invert][0])
+
+            x = -(b * torch.linspace(-30, 0, 50)[y] + c * torch.linspace(-30, 30, 100)[z] + d) / a
+            points.append(
+                [x.item(), torch.linspace(-30, 0, 50)[y].item(), torch.linspace(-30, 30, 100)[z].item()])
+
+            _, y_distribution = margins(gradient_image[:, :, z])
+
+        elif 225 <= degree_threshold < 315:
+            x_distribution, _ = margins(gradient_image[:, y, :])
+            x = x_distribution.flatten()
+            x /= np.sum(x)
+            cdf = np.cumsum(x)
+            probabilities_to_invert = np.random.uniform(0, 1, 1)
+            x = closest(torch.linspace(-30, 30, 100),
+                        [inverse_cdf(p, torch.linspace(-30, 30, 100), cdf) for p in probabilities_to_invert][0])
+
+            z = -(a * torch.linspace(-30, 30, 100)[x] + b * torch.linspace(-30, 0, 50)[y] + d) / c
+            points.append(
+                [torch.linspace(-30, 30, 100)[x].item(), torch.linspace(-30, 0, 50)[y].item(), z.item()])
+
+            y_distribution, _ = margins(gradient_image[x, :, :])
+        else:
+            _, z_distribution = margins(gradient_image[:, y, :])
+            z = z_distribution.flatten()
+            z /= np.sum(z)
+            cdf = np.cumsum(z)
+            probabilities_to_invert = np.random.uniform(0, 1, 1)
+            z = closest(torch.linspace(-30, 30, 100),
+                        [inverse_cdf(p, torch.linspace(-30, 30, 100), cdf) for p in probabilities_to_invert][0])
+
+            x = -(b * torch.linspace(-30, 0, 50)[y] + c * torch.linspace(-30, 30, 100)[z] + d) / a
+            points.append(
+                [x.item(), torch.linspace(-30, 0, 50)[y].item(), torch.linspace(-30, 30, 100)[z].item()])
+
+            _, y_distribution = margins(gradient_image[:, :, z])
+
+    return [[p_p / 10 for p_p in p] for p in points]
+
+
+def autograd_proxy(output, input_tensor):
+    grad_outputs = torch.autograd.grad(outputs=output, inputs=input_tensor, grad_outputs=torch.ones_like(output),
+                                       is_grads_batched=False)[0]
+    # output.backward()
+    # print("mid-1")
+
+    if grad_outputs.device != 'cpu':
+        grad_outputs.detach().cpu()
+
+    gradient_image = torch.tensor([math.sqrt((x ** 2) + (y ** 2) + (z ** 2)) for [x, y, z] in grad_outputs],
+                                  dtype=torch.float32, device='cpu')
+    return gradient_image
+
+
+def sample_point_from_plane_gradient_refactored(plane, degree_threshold, side, gradient_image, model, k=100):
+    points = []
+    a, b, c, d = plane
+
+    y = torch.linspace(-30, 0, 50)
+
+    if 45 <= degree_threshold < 135:
+        x = torch.linspace(-30, 30, 100)
+        # zz, yy = torch.meshgrid(z, y, indexing='ij')
+
+        grid_points = []
+        for i in x:
+            for j in y:
+                z = -(a * i + b * j + d) / c
+                # print(x)
+                grid_points.append([i, j, z])
+
+        # zz = -(a * xx + b * yy + d) / c
+        # grid_points = torch.stack([xx, yy, zz], dim=-1)
+        grid_points = torch.tensor(grid_points, dtype=torch.float32)
+
+        # xx = -(b * yy + c ** zz + d) / a
+
+        # grid_points = torch.stack([xx, yy, zz], dim=-1)
+    elif 135 <= degree_threshold < 225:
+        z = torch.linspace(-30, 30, 100)
+        # zz, yy = torch.meshgrid(z, y, indexing='ij')
+
+        grid_points = []
+        for i in z:
+            for j in y:
+                x = -(c * i + b * j + d) / a
+                # print(x)
+                grid_points.append([x, j, i])
+
+        # zz = -(a * xx + b * yy + d) / c
+        # grid_points = torch.stack([xx, yy, zz], dim=-1)
+        grid_points = torch.tensor(grid_points, dtype=torch.float32)
+
+        # xx = -(b * yy + c ** zz + d) / a
+
+        # grid_points = torch.stack([xx, yy, zz], dim=-1)
+    elif 225 <= degree_threshold < 315:
+        x = torch.linspace(-30, 30, 100)
+        # zz, yy = torch.meshgrid(z, y, indexing='ij')
+
+        grid_points = []
+        for i in x:
+            for j in y:
+                z = -(a * i + b * j + d) / c
+                # print(x)
+                grid_points.append([i, j, z])
+
+        # zz = -(a * xx + b * yy + d) / c
+        # grid_points = torch.stack([xx, yy, zz], dim=-1)
+        grid_points = torch.tensor(grid_points, dtype=torch.float32)
+
+        # xx = -(b * yy + c ** zz + d) / a
+
+        # grid_points = torch.stack([xx, yy, zz], dim=-1)
+    else:
+        z = torch.linspace(-30, 30, 100)
+        # zz, yy = torch.meshgrid(z, y, indexing='ij')
+
+        grid_points = []
+        for i in z:
+            for j in y:
+                x = -(c * i + b * j + d) / a
+                # print(x)
+                grid_points.append([x, j, i])
+
+        # zz = -(a * xx + b * yy + d) / c
+        # grid_points = torch.stack([xx, yy, zz], dim=-1)
+        grid_points = torch.tensor(grid_points, dtype=torch.float32)
+
+        # xx = -(b * yy + c ** zz + d) / a
+
+        # grid_points = torch.stack([xx, yy, zz], dim=-1)
+
+    grid_points_clone = grid_points.clone()
+    grid_points_clone /= 10
+    # grid_points = [[p_p / 10 for p_p in p] for p in grid_points]
+    # grid_points = grid_points.flatten(start_dim=0, end_dim=1)
+    # print("start-1")
+    input_tensor = torch.tensor(grid_points, dtype=torch.float32, requires_grad=True)
+    output = model(input_tensor)  # input_tensor
+    gradient_image = autograd_proxy(output, input_tensor)
+
+    # output = output.view(50, 100)
+    output = output.view(100, 50)
+    output = output.detach().cpu().numpy()
+    dbg = False
+    if dbg:
+        plane = output
+        fig = plt.figure()
+        plt.imshow(plane)
+        # plt.show(block=True)
+        plt.show(block=False)
+
+        plane = gradient_image.view(100, 50)
+        fig = plt.figure()
+        plt.imshow(plane)
+        # plt.show(block=True)
+        plt.show(block=False)
+
+    x_distr, _ = margins(gradient_image.view(100, 50).numpy())
+
+    for _ in range(k):
+        x = x_distr.flatten()
+        x /= np.sum(x)
+        cdf = np.cumsum(x)
+        probabilities_to_invert = np.random.uniform(0, 1, 1)
+        x = closest(torch.linspace(-30, 30, 100),
+                    [inverse_cdf(p, torch.linspace(-30, 30, 100), cdf) for p in probabilities_to_invert][0])
+
+        '''
+        plt.figure()
+        plt.plot(x)
+        plt.show(block=False)
+
+        plt.figure()
+        plt.plot(cdf)
+        plt.show(block=False)
+        '''
+
+        y_distr = margins(gradient_image.view(100, 50)[x, :].numpy())[0]
+
+        y = y_distr.flatten()
+        y /= np.sum(y)
+        cdf = np.cumsum(y)
+        probabilities_to_invert = np.random.uniform(0, 1, 1)
+        y = closest(torch.linspace(-30, 0, 50),
+                    [inverse_cdf(p, torch.linspace(-30, 0, 50), cdf) for p in probabilities_to_invert][0])
+
+        '''
+        plt.figure()
+        plt.plot(y)
+        plt.show(block=False)
+
+        plt.figure()
+        plt.plot(cdf)
+        plt.show(block=False)
+        '''
+
+        x_distr = margins(gradient_image.view(100, 50)[:, y].numpy())[0]
+
+        points.append(grid_points_clone.view(100, 50, 3)[x, y].cpu().numpy())
+
+    points = np.array(points)
+    points = torch.from_numpy(points)
+    return torch.tensor(points, dtype=torch.float32, device='cpu')  # grid_points_clone
