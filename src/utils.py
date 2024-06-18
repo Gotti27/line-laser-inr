@@ -281,8 +281,6 @@ def closest(lst, k):
 def autograd_proxy(output, input_tensor):
     grad_outputs = torch.autograd.grad(outputs=output, inputs=input_tensor, grad_outputs=torch.ones_like(output),
                                        is_grads_batched=False)[0]
-    # output.backward()
-    # print("mid-1")
 
     if grad_outputs.device != 'cpu':
         grad_outputs.detach().cpu()
@@ -292,95 +290,38 @@ def autograd_proxy(output, input_tensor):
     return gradient_image
 
 
-def sample_point_from_plane_gradient_refactored(plane, degree_threshold, side, gradient_image, model, k=100):
+def sample_point_from_plane_gradient(plane, degree_threshold, model, k=100):
     points = []
     a, b, c, d = plane
-
     y = torch.linspace(-30, 0, 50)
 
-    if 45 <= degree_threshold < 135:
+    if 45 <= degree_threshold < 135 or 225 <= degree_threshold < 315:
         x = torch.linspace(-30, 30, 100)
-        # zz, yy = torch.meshgrid(z, y, indexing='ij')
 
         grid_points = []
         for i in x:
             for j in y:
                 z = -(a * i + b * j + d) / c
-                # print(x)
                 grid_points.append([i, j, z])
 
-        # zz = -(a * xx + b * yy + d) / c
-        # grid_points = torch.stack([xx, yy, zz], dim=-1)
         grid_points = torch.tensor(grid_points, dtype=torch.float32)
-
-        # xx = -(b * yy + c ** zz + d) / a
-
-        # grid_points = torch.stack([xx, yy, zz], dim=-1)
-    elif 135 <= degree_threshold < 225:
-        z = torch.linspace(-30, 30, 100)
-        # zz, yy = torch.meshgrid(z, y, indexing='ij')
-
-        grid_points = []
-        for i in z:
-            for j in y:
-                x = -(c * i + b * j + d) / a
-                # print(x)
-                grid_points.append([x, j, i])
-
-        # zz = -(a * xx + b * yy + d) / c
-        # grid_points = torch.stack([xx, yy, zz], dim=-1)
-        grid_points = torch.tensor(grid_points, dtype=torch.float32)
-
-        # xx = -(b * yy + c ** zz + d) / a
-
-        # grid_points = torch.stack([xx, yy, zz], dim=-1)
-    elif 225 <= degree_threshold < 315:
-        x = torch.linspace(-30, 30, 100)
-        # zz, yy = torch.meshgrid(z, y, indexing='ij')
-
-        grid_points = []
-        for i in x:
-            for j in y:
-                z = -(a * i + b * j + d) / c
-                # print(x)
-                grid_points.append([i, j, z])
-
-        # zz = -(a * xx + b * yy + d) / c
-        # grid_points = torch.stack([xx, yy, zz], dim=-1)
-        grid_points = torch.tensor(grid_points, dtype=torch.float32)
-
-        # xx = -(b * yy + c ** zz + d) / a
-
-        # grid_points = torch.stack([xx, yy, zz], dim=-1)
     else:
         z = torch.linspace(-30, 30, 100)
-        # zz, yy = torch.meshgrid(z, y, indexing='ij')
 
         grid_points = []
         for i in z:
             for j in y:
                 x = -(c * i + b * j + d) / a
-                # print(x)
                 grid_points.append([x, j, i])
 
-        # zz = -(a * xx + b * yy + d) / c
-        # grid_points = torch.stack([xx, yy, zz], dim=-1)
         grid_points = torch.tensor(grid_points, dtype=torch.float32)
-
-        # xx = -(b * yy + c ** zz + d) / a
-
-        # grid_points = torch.stack([xx, yy, zz], dim=-1)
 
     grid_points_clone = grid_points.clone()
     grid_points_clone /= 10
-    # grid_points = [[p_p / 10 for p_p in p] for p in grid_points]
-    # grid_points = grid_points.flatten(start_dim=0, end_dim=1)
-    # print("start-1")
     input_tensor = torch.tensor(grid_points, dtype=torch.float32, requires_grad=True)
-    output = model(input_tensor)  # input_tensor
+    output = model(input_tensor)
     gradient_image = autograd_proxy(output, input_tensor)
 
-    # output = output.view(50, 100)
     output = output.view(100, 50)
     output = output.detach().cpu().numpy()
     dbg = False
