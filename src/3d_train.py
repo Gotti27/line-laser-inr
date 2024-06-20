@@ -9,7 +9,7 @@ import torch.utils.data
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
 
-from inr_model import INR3D
+from inr_model import INR3D, sign_loss
 from utils import *
 
 UNIFORM_TRAINING_EPOCHS = 100
@@ -179,12 +179,14 @@ def laser_ray_sampling(image, laser_points):
                     if red_channel[point[1], point[0]] > 200:
                         break
 
+        '''
         if debug:
             cv.drawMarker(render, p_far_point, [255, 255, 0], cv2.MARKER_DIAMOND, 2, 1)
             cv.drawMarker(render, p, [0, 0, 255], cv.MARKER_CROSS, 2, 2)
             cv.imshow('red', red_channel)
             cv.imshow('foobar', render)
             cv.waitKey(1)
+        '''
 
         if unknown:
             points.append([[x, y, z], 0])
@@ -269,16 +271,15 @@ def create_gradient_base_dataset(gradient_image, silhouette_points=3000, laser_p
     internal = []
     unknown = []
 
-    # FIXME
+    # FIXME uniform dataset concatenation
 
-    # print(uniform_dataset.data[0])
-    '''
-    if uniform_dataset is not None:
-        for point, label in uniform_dataset.data:
+    if uniform_dataset_train is not None:
+        for point, label in uniform_dataset_train.dataset.data:
             if label == 1:
                 external.append(point.detach().cpu().numpy())
             else:
                 internal.append(point.detach().cpu().numpy())
+    '''
     '''
 
     inputs = np.array([]).reshape(0, 3)
@@ -349,19 +350,16 @@ class CustomDataset(Dataset):
         return data, label
 
 
-if UNIFORM_TRAINING_EPOCHS > 0:
-    uniform_dataset = CustomDataset(create_uniform_dataset(40000, 3000))
-else:
-    uniform_dataset = None
+uniform_dataset = CustomDataset(create_uniform_dataset(30000, 1000))
+
+uniform_dataset_train, uniform_dataset_val = torch.utils.data.random_split(uniform_dataset, [.8, .2],
+                                                                           generator=torch.Generator(device=device))
 
 
 def train_one_epoch_uniformly(epoch_index, tb_writer):
     running_loss = 0.
     last_loss = 0.
 
-    # uniform_dataset.data.to(device)
-    training_loader = torch.utils.data.DataLoader(uniform_dataset, batch_size=256, shuffle=True,
-                                                  generator=torch.Generator(device=device), num_workers=0)
     for batch_index, data in enumerate(training_loader):
         # Every data instance is an input + label pair
         inputs, labels = data
@@ -386,6 +384,12 @@ def train_one_epoch_uniformly(epoch_index, tb_writer):
     return last_loss
 
 
+training_loader = torch.utils.data.DataLoader(uniform_dataset_train, batch_size=64, shuffle=True,
+                                              generator=torch.Generator(device=device), num_workers=0)
+
+validation_loader = torch.utils.data.DataLoader(uniform_dataset_val, batch_size=64, shuffle=True,
+                                                generator=torch.Generator(device=device), num_workers=0)
+
 for epoch in range(UNIFORM_TRAINING_EPOCHS):
     print('EPOCH {}:'.format(epoch_number + 1))
 
@@ -393,25 +397,20 @@ for epoch in range(UNIFORM_TRAINING_EPOCHS):
     avg_loss = train_one_epoch_uniformly(epoch_number, writer)
 
     running_vloss = 0.0
-    '''
     model.eval()
-    
     with torch.no_grad():
-        val_x = np.random.uniform(-30., 30., 100)
-        val_y = np.random.uniform(-30., 0., 100)
-        val_z = np.random.uniform(-30., 30, 100)
+        for batch_index, data in enumerate(validation_loader):
+            inputs, labels = data
 
-        v_inputs = [[val_x[i], val_y[i]] for i in range(100)]
-        v_labels = torch.tensor([[realistic_oracle(p)] for p in v_inputs], dtype=torch.float32, requires_grad=True,
-                                device=device)
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            running_vloss += sign_loss(outputs, labels)
 
-        v_outputs = model(torch.tensor(v_inputs, dtype=torch.float32, requires_grad=True, device=device))
-        v_loss = loss_fn(v_outputs, v_labels)
+        avg_vloss = running_vloss / (len(validation_loader) + 1)
 
-    print('LOSS train {} valid {}'.format(avg_loss, v_loss))
-    '''
+    print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
 
-    print('LOSS train {} valid {}'.format(avg_loss, 'unknown'))
+    # print('LOSS train {} valid {}'.format(avg_loss, 'unknown'))
     # Log the running loss averaged per batch
     # for both training and validation
     writer.add_scalars('Training vs. Validation Loss',
@@ -720,8 +719,9 @@ def train_one_epoch_gradient(epoch_index, tb_writer):
     running_loss = 0.
     last_loss = 0.
 
-    training_loader = torch.utils.data.DataLoader(gradient_based_dataset, batch_size=128, shuffle=True,
+    training_loader = torch.utils.data.DataLoader(gradient_based_dataset, batch_size=64, shuffle=True,
                                                   generator=torch.Generator(device=device), num_workers=0)
+
     for batch_index, data in enumerate(training_loader):
         # Every data instance is an input + label pair
         inputs, labels = data
@@ -756,7 +756,7 @@ if GRADIENT_BASED_TRAINING_EPOCHS > 0:
     if device.type != 'cpu':
         test = test.cpu().detach().numpy()
 
-    gradient_based_dataset = CustomDataset(create_gradient_base_dataset(test, 10000, 1000))
+    gradient_based_dataset = CustomDataset(create_gradient_base_dataset(test, 10000, 500))
 
 else:
     test = None
@@ -783,6 +783,7 @@ for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
         plt.show(block=True)
 
     # print(test)
+    model.train(True)
     avg_loss = train_one_epoch_gradient(epoch_number, writer)
 
     running_vloss = 0.0
