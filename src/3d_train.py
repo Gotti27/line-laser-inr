@@ -12,8 +12,8 @@ from torch.utils.tensorboard import SummaryWriter
 from inr_model import INR3D
 from utils import *
 
-UNIFORM_TRAINING_EPOCHS = 100  # 150  # 50  # 50  # 100  # 350  # 200  # 6
-GRADIENT_BASED_TRAINING_EPOCHS = 5  # 1  # 2
+UNIFORM_TRAINING_EPOCHS = 100
+GRADIENT_BASED_TRAINING_EPOCHS = 50
 
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 pv.global_theme.allow_empty_mesh = True
@@ -42,7 +42,7 @@ torch.manual_seed(41)
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.set_default_device(device)
 model = INR3D(device=device)
-model.to(device)
+model = model.to(device)
 loss_fn = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
@@ -54,16 +54,21 @@ if load:
 def load_render():
     renders = {}
 
-    for image in list(filter(lambda img: 'right' in img, images)):
+    for image in images:
         degree = image.split('_')[1]
         side = image.split('_')[2]
         with open(f'renders/data_{degree}_{side}.pkl', 'rb') as data_input_file:
             K = pickle.load(data_input_file)
             R = pickle.load(data_input_file)
             t = pickle.load(data_input_file)
+            laser_center = pickle.load(data_input_file)
+            laser_norm = pickle.load(data_input_file)
 
         render_depth = cv.imread(os.path.join(image_folder, image), cv.IMREAD_UNCHANGED)
-        renders[image] = {'K': K, 'R': R, 't': t, 'render': render_depth}
+        renders[image] = {'K': K, 'R': R, 't': t,
+                          'render': render_depth,
+                          'laser_center': laser_center, 'laser_norm': laser_norm
+                          }
     return renders
 
 
@@ -99,13 +104,12 @@ def laser_ray_sampling(image, laser_points):
     points = []
     degree = int(image.split('_')[1])
     side = image.split('_')[2]
-    with open(f'renders/data_{degree}_{side}.pkl',
-              'rb') as data_input_file:
-        K = pickle.load(data_input_file)
-        R = pickle.load(data_input_file)
-        t = pickle.load(data_input_file)
-        laser_center = pickle.load(data_input_file)
-        laser_norm = pickle.load(data_input_file)
+
+    K = renders_matrices[image]['K']
+    R = renders_matrices[image]['R']
+    t = renders_matrices[image]['t']
+    laser_center = renders_matrices[image]['laser_center']
+    laser_norm = renders_matrices[image]['laser_norm']
 
     a, b, c = laser_norm
     d = -(a * laser_center[0] + b * laser_center[1] + c * laser_center[2])
