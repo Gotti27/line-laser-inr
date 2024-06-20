@@ -14,6 +14,12 @@ mi.set_variant('llvm_ad_rgb')
 
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
+# Execution flags
+testing = True  # Just fooling the static analyzer :)
+do_all_renders = False
+laser_degree_delta = 30
+target = 'teapot.ply'
+
 # Calculating Camera Intrinsic parameters
 
 vertical_fov = 60
@@ -36,10 +42,10 @@ print(K)
 
 ###
 
-testing = False  # Just fooling the static analyzer :)
 if testing:
-    testing_angle = 0
-    scene = mi.load_file("scenes/gear_right.xml", angle=testing_angle)
+    testing_angle = 45
+    scene = mi.load_file("scenes/gear_right.xml", angle=testing_angle, target=target,
+                         laser_angle_delta=laser_degree_delta)
 
     image = mi.render(scene, spp=256)
     print(image)
@@ -55,17 +61,17 @@ if testing:
     # t = np.array([0, 0, 7.])
     t = np.array([0, 2, 7.])
     R = np.eye(3, 3)
+    R @= rotate_x(20)
     R @= rotate_y(testing_angle)
     # R @= rotate_x(90)
-    R @= rotate_x(20)
 
     camera_position = - np.matrix(R).T @ t
     print("pose: ", camera_position)
     print("Projection Matrix: ", K @ np.concatenate([R, np.matrix(t).T], axis=1))
 
     print(np.append(camera_position, [[1]], axis=1))
-    laser_center = np.squeeze(np.asarray(camera_position)) @ rotate_y(30)
-    laser_norm = np.array([1, 0, 0]) @ rotate_x(20) @ rotate_y(30)
+    laser_center = np.squeeze(np.asarray(camera_position)) @ rotate_y(laser_degree_delta)
+    laser_norm = np.array([1, 0, 0]) @ rotate_x(20) @ rotate_y(testing_angle) @ rotate_y(laser_degree_delta)
     print("laser center: ", laser_center)
     print("laser norm: ", laser_norm)
 
@@ -102,7 +108,9 @@ if testing:
 
 def do_renders(side):
     for i in range(360):
-        rendered_image = mi.render(mi.load_file(f"scenes/gear_{side}.xml", angle=i), spp=256)
+        rendered_image = mi.render(
+            mi.load_file(f"scenes/gear_{side}.xml", angle=i, target=target, laser_angle_delta=laser_degree_delta),
+            spp=256)
         cv.imshow("rendering progress", np.array(rendered_image))
         cv.waitKey(1)
         mi.util.write_bitmap(f"renders/data_{i}_{side}_render.exr", rendered_image)
@@ -110,7 +118,6 @@ def do_renders(side):
         print(f"{round(i / 360 * 100)}%")
 
 
-do_all_renders = False
 if do_all_renders:
     if not os.path.exists("renders"):
         os.mkdir('renders')
@@ -145,8 +152,8 @@ for degree, image in enumerate(right_images):
     print("Projection Matrix: ", K @ np.concatenate([R, np.matrix(t).T], axis=1))
 
     print(np.append(camera_position, [[1]], axis=1))
-    laser_center = np.squeeze(np.asarray(camera_position)) @ rotate_y(30)
-    laser_norm = np.array([1, 0, 0]) @ rotate_x(20) @ rotate_y(degree) @ rotate_y(30)
+    laser_center = np.squeeze(np.asarray(camera_position)) @ rotate_y(laser_degree_delta)
+    laser_norm = np.array([1, 0, 0]) @ rotate_x(20) @ rotate_y(degree) @ rotate_y(laser_degree_delta)
     print("laser center: ", laser_center)
     print("laser norm: ", laser_norm)
 
@@ -215,8 +222,8 @@ for degree, image in enumerate(left_images):
     print("Projection Matrix: ", K @ np.concatenate([R, np.matrix(t).T], axis=1))
 
     print(np.append(camera_position, [[1]], axis=1))
-    laser_center = np.squeeze(np.asarray(camera_position)) @ rotate_y(-30)
-    laser_norm = np.array([1, 0, 0]) @ rotate_x(0) @ rotate_y(degree) @ rotate_y(-30)
+    laser_center = np.squeeze(np.asarray(camera_position)) @ rotate_y(-laser_degree_delta)
+    laser_norm = np.array([1, 0, 0]) @ rotate_x(0) @ rotate_y(degree) @ rotate_y(-laser_degree_delta)
     print("laser center: ", laser_center)
     print("laser norm: ", laser_norm)
 

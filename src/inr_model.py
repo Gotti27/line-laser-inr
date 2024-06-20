@@ -50,3 +50,7 @@ class INR3D(nn.Module):
         x = nn.functional.tanh(self.out(x))
 
         return x
+
+
+def sign_loss(output, target):
+    return sum([1 for i in range(len(output)) if (output[i] * target[i]) < 0])
