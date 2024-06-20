@@ -31,14 +31,14 @@
 
     </sensor>
 
-    <shape type="ply" id="teapot">
-        <string name="filename" value="meshes/teapot.ply"/>
+    <shape type="ply" id="target-object">
+        <string name="filename" value="meshes/$target"/>
         <bsdf type="diffuse">
             <rgb name="reflectance" value="1 1 1"/>
         </bsdf>
         <transform name="to_world">
             <rotate x="1" angle="-90"/>
-            <scale value="0.8"/>
+            <!--<scale value="0.8"/>-->
         </transform>
     </shape>
 
@@ -57,7 +57,7 @@
 
     <emitter type="point" id="light1">
         <!-- <point name="position" x="3" y="0" z="-10"/> -->
-        <rgb name="intensity" value="20.0"/>
+        <rgb name="intensity" value="30.0"/>
         <transform name="to_world">
             <translate z="-10"/>
             <translate x="3"/>
@@ -67,7 +67,7 @@
 
     <emitter type="point" id="light2">
         <!-- <point name="position" x="-3" y="0.0" z="-10"/> -->
-        <rgb name="intensity" value="20.0"/>
+        <rgb name="intensity" value="30.0"/>
         <transform name="to_world">
             <translate z="-10"/>
             <translate x="-3"/>
@@ -86,7 +86,7 @@
             <translate z="-7"/>
             <translate y="0"/>
             <rotate x="1" angle="0"/>
-            <rotate y="1" angle="-30"/>
+            <rotate y="1" angle="-$laser_angle_delta"/>
             <rotate y="1" angle="$angle"/>
 
 

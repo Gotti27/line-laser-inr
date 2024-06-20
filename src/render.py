@@ -18,6 +18,7 @@ os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 testing = True  # Just fooling the static analyzer :)
 do_all_renders = False
 laser_degree_delta = 30
+target = 'teapot.ply'
 
 # Calculating Camera Intrinsic parameters
 
@@ -43,7 +44,8 @@ print(K)
 
 if testing:
     testing_angle = 45
-    scene = mi.load_file("scenes/gear_right.xml", angle=testing_angle)
+    scene = mi.load_file("scenes/gear_right.xml", angle=testing_angle, target=target,
+                         laser_angle_delta=laser_degree_delta)
 
     image = mi.render(scene, spp=256)
     print(image)
@@ -106,7 +108,9 @@ if testing:
 
 def do_renders(side):
     for i in range(360):
-        rendered_image = mi.render(mi.load_file(f"scenes/gear_{side}.xml", angle=i), spp=256)
+        rendered_image = mi.render(
+            mi.load_file(f"scenes/gear_{side}.xml", angle=i, target=target, laser_angle_delta=laser_degree_delta),
+            spp=256)
         cv.imshow("rendering progress", np.array(rendered_image))
         cv.waitKey(1)
         mi.util.write_bitmap(f"renders/data_{i}_{side}_render.exr", rendered_image)
