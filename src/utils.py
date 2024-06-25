@@ -246,28 +246,33 @@ def project_point(point, rotation_matrix, translation_vector, camera_intrinsic_m
     return [int(round(camera_p[0, 0] / camera_p[0, 2])), int(round(camera_p[0, 1] / camera_p[0, 2]))]
 
 
-def sample_point_from_plane(plane, degree_threshold, side):
-    a, b, c, d = plane
+def cross_product_proxy(a, b):
+    return np.cross(a, b)
 
-    if side == 'right':
-        y = random.uniform(-3, 0)
+
+def sample_point_from_plane(laser_center, laser_norm):
+    translation_vector = np.array(laser_center)
+    laser_norm /= np.linalg.norm(laser_norm)
+
+    if np.allclose(laser_norm[:2], 0):
+        u = np.array([1, 0, 0])
     else:
-        y = random.uniform(-3, 0)  # TODO: update this to use different ranges given the side
+        u = np.array([-laser_norm[1], laser_norm[0], 0]) / np.linalg.norm(np.array([-laser_norm[1], laser_norm[0], 0]))
+    v = (cross_product_proxy(laser_norm, u)) / np.linalg.norm(cross_product_proxy(laser_norm, u))
 
-    if 45 <= degree_threshold < 135:
-        x = random.uniform(-3, 3)
-        z = -(a * x + b * y + d) / c
-    elif 135 <= degree_threshold < 225:
-        z = random.uniform(-3, 3)
-        x = -(c * z + b * y + d) / a
-    elif 225 <= degree_threshold < 315:
-        x = random.uniform(-3, 3)
-        z = -(a * x + b * y + d) / c
-    else:
-        z = random.uniform(-3, 3)
-        x = -(c * z + b * y + d) / a
+    R = np.column_stack((u, v, laser_norm))
 
-    return [x, y, z]
+    x = random.uniform(-1.5, 1.5)
+    y = random.uniform(-3, 3)
+    z = 0
+
+    point = np.array([x, y, z, 1])
+    world_point = np.concatenate(
+        [np.concatenate([R, np.matrix(translation_vector).T], axis=1),
+         np.array([[0, 0, 0, 1]])], axis=0) @ point
+
+    world_point = np.squeeze(np.asarray(world_point))
+    return [world_point[0] / world_point[3], world_point[1] / world_point[3], world_point[2] / world_point[3]]
 
 
 def inverse_cdf(p, x, cdf):
