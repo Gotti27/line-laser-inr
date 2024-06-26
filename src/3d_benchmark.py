@@ -15,9 +15,9 @@ loss_fn = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 model.load_state_dict(torch.load('3d-model', map_location=device))
 
-x = torch.linspace(-30, 30, 100)
-y = torch.linspace(-30, 0, 50)
-z = torch.linspace(-30, 30, 100)
+x = torch.linspace(-40, 40, 100)
+y = torch.linspace(-40, 0, 50)
+z = torch.linspace(-40, 40, 100)
 X, Y, Z = torch.meshgrid(x, y, z)
 
 points = torch.stack((X.flatten(), Y.flatten(), Z.flatten()), dim=-1)

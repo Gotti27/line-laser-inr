@@ -3,13 +3,12 @@ import os
 import pickle
 from datetime import datetime
 
-import cv2
 import pyvista as pv
 import torch.utils.data
 from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
 
-from inr_model import INR3D, sign_loss
+from inr_model import sign_loss
 from utils import *
 
 UNIFORM_TRAINING_EPOCHS = 100
@@ -31,9 +30,13 @@ debug = args.debug
 if debug:
     print("---DEBUG MODE ACTIVATED---")
 
+if debug:
+    UNIFORM_TRAINING_EPOCHS = 0
+
 print(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
 
-image_folder = 'renders'
+target = 'teapot'
+image_folder = f'renders/{target}'
 images = [img for img in os.listdir(image_folder) if img.endswith(".exr")]
 images.sort(key=lambda name: int(name.split('_')[1]))
 
@@ -46,8 +49,8 @@ model = model.to(device)
 loss_fn = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-load = False
-if load:
+load = True
+if debug and load:
     model.load_state_dict(torch.load('3d-model', map_location=device))
 
 
@@ -57,7 +60,7 @@ def load_render():
     for image in images:
         degree = image.split('_')[1]
         side = image.split('_')[2]
-        with open(f'renders/data_{degree}_{side}.pkl', 'rb') as data_input_file:
+        with open(f'renders/{target}/data_{degree}_{side}.pkl', 'rb') as data_input_file:
             K = pickle.load(data_input_file)
             R = pickle.load(data_input_file)
             t = pickle.load(data_input_file)
@@ -119,7 +122,7 @@ def laser_ray_sampling(image, laser_points):
     _, red_channel = cv.threshold(red_channel, 100, 255, cv.THRESH_BINARY)
 
     camera_position = np.squeeze(np.asarray(- np.matrix(R).T @ t))
-    point_cloud_e = [laser_center, camera_position]
+    point_cloud_e = []  # [laser_center, camera_position]
     point_cloud_u = []  # [laser_center, camera_position]
 
     for u in range(red_channel.shape[0]):
@@ -144,8 +147,7 @@ def laser_ray_sampling(image, laser_points):
             break
 
     for _ in range(laser_points):  # here
-        x, y, z = sample_point_from_plane([0, -1.5, 0], laser_norm)
-
+        x, y, z = sample_point_from_plane([0, -2, 0], laser_norm)
         p = project_point([x, y, z], R, t, K)
         p_laser_center = project_point([laser_center[0], laser_center[1], laser_center[2]], R, t, K)
 
@@ -181,7 +183,7 @@ def laser_ray_sampling(image, laser_points):
 
         '''
         if debug:
-            cv.drawMarker(render, p_far_point, [255, 255, 0], cv2.MARKER_DIAMOND, 2, 1)
+            cv.drawMarker(render, p_far_point, [255, 255, 0], cv.MARKER_DIAMOND, 2, 1)
             cv.drawMarker(render, p, [0, 0, 255], cv.MARKER_CROSS, 2, 2)
             cv.imshow('red', red_channel)
             cv.imshow('foobar', render)
@@ -195,6 +197,7 @@ def laser_ray_sampling(image, laser_points):
             points.append([[x, y, z], 1])
             point_cloud_e.append([x, y, z])
 
+    # cv.waitKey(0)
     '''
     if debug:
         mesh = pv.read('scenes/meshes/teapot.ply')
@@ -218,7 +221,7 @@ def create_uniform_dataset(silhouette_points=3000, laser_points=300):
 
     inputs = np.array([]).reshape(0, 3)
 
-    for point in [[random.uniform(-3, 3), random.uniform(-3, 0), random.uniform(-3, 3)] for _ in
+    for point in [[random.uniform(-4, 4), random.uniform(-4, 0), random.uniform(-4, 4)] for _ in
                   range(silhouette_points)]:
         label = silhouette_sampling(point)
         if label == 1:
@@ -239,22 +242,26 @@ def create_uniform_dataset(silhouette_points=3000, laser_points=300):
 
     if debug:
         point_cloud = pv.PolyData([[p_p * 10 for p_p in p] for p in unknown])
-        point_cloud.plot(eye_dome_lighting=True)
+        point_cloud.plot(eye_dome_lighting=True, show_axes=True, show_bounds=True)
         point_cloud = pv.PolyData([[p_p * 10 for p_p in p] for p in external])
-        point_cloud.plot(eye_dome_lighting=True)
+        point_cloud.plot(eye_dome_lighting=True, show_axes=True, show_bounds=True)
 
     print("Uniform raw dataset created - executing KNN")
-    external, internal = knn_point_classification(external, internal, unknown, 5)
+
+    external, internal = knn_point_classification([[p_p * 10 for p_p in p] for p in external],
+                                                  [[p_p * 10 for p_p in p] for p in internal],
+                                                  [[p_p * 10 for p_p in p] for p in unknown], 10)
+
     print("Uniform dataset created")
 
     if debug:
-        point_cloud = pv.PolyData([[p_p * 10 for p_p in p] for p in internal])
+        point_cloud = pv.PolyData(internal)
         point_cloud.plot(eye_dome_lighting=True)
-        point_cloud = pv.PolyData([[p_p * 10 for p_p in p] for p in external])
+        point_cloud = pv.PolyData(external)
         point_cloud.plot(eye_dome_lighting=True)
 
-    inputs = np.concatenate((inputs, [[p_p * 10 for p_p in p] for p in external]), axis=0)
-    inputs = np.concatenate((inputs, [[p_p * 10 for p_p in p] for p in internal]), axis=0)
+    inputs = np.concatenate((inputs, external), axis=0)
+    inputs = np.concatenate((inputs, internal), axis=0)
 
     labels = torch.tensor([[1] for _ in external] + [[-1] for _ in internal], dtype=torch.float32,
                           requires_grad=True, device=device)
@@ -307,8 +314,6 @@ def create_gradient_base_dataset(gradient_image, silhouette_points=3000, laser_p
             else:
                 internal.append(point)
         # print(f"{image} done")
-    '''
-    '''
 
     if debug:
         point_cloud = pv.PolyData(unknown)
@@ -434,9 +439,9 @@ def compute_gradient_image_from_model():
     #                             device=device)  # torch.tensor([], dtype=torch.float32,
     #            device=device)  # torch.zeros([100, 50, 100], dtype=torch.float32, device=device)  # np.zeros([100, 50, 100])
 
-    x = torch.linspace(-30, 30, 100, device=device)
-    y = torch.linspace(-30, 0, 50, device=device)
-    z = torch.linspace(-30, 30, 100, device=device)
+    x = torch.linspace(-40, 40, 100, device=device)
+    y = torch.linspace(-40, 0, 50, device=device)
+    z = torch.linspace(-40, 40, 100, device=device)
     X, Y, Z = torch.meshgrid(x, y, z)
 
     '''
@@ -475,13 +480,6 @@ def compute_gradient_image_from_model():
     # output.backward()
     print("mid")
 
-    def foo(elem):
-        print("hej")
-        print(elem)
-        return elem
-
-    # torch.vmap(foo)(grad_outputs)
-
     if grad_outputs.device != 'cpu':
         grad_outputs.detach().cpu()
 
@@ -515,8 +513,8 @@ def sample_from_gradient_image(gradient_image, k):
         '''
 
         probabilities_to_invert = np.random.uniform(0, 1, 1)
-        x = closest(torch.linspace(-30, 30, 100),
-                    [inverse_cdf(p, torch.linspace(-30, 30, 100), cdf) for p in probabilities_to_invert][0])
+        x = closest(torch.linspace(-40, 40, 100),
+                    [inverse_cdf(p, torch.linspace(-40, 40, 100), cdf) for p in probabilities_to_invert][0])
 
         y_distribution, _ = margins(gradient_image[x, :, :])
         y = y_distribution.flatten()
@@ -535,8 +533,8 @@ def sample_from_gradient_image(gradient_image, k):
         '''
 
         probabilities_to_invert = np.random.uniform(0, 1, 1)
-        y = closest(torch.linspace(-30, 0, 50),
-                    [inverse_cdf(p, torch.linspace(-30, 0, 50), cdf) for p in probabilities_to_invert][0])
+        y = closest(torch.linspace(-40, 0, 50),
+                    [inverse_cdf(p, torch.linspace(-40, 0, 50), cdf) for p in probabilities_to_invert][0])
 
         _, z_distribution = margins(gradient_image[:, y, :])
 
@@ -556,12 +554,12 @@ def sample_from_gradient_image(gradient_image, k):
         '''
 
         probabilities_to_invert = np.random.uniform(0, 1, 1)
-        z = closest(torch.linspace(-30, 30, 100),
-                    [inverse_cdf(p, torch.linspace(-30, 30, 100), cdf) for p in probabilities_to_invert][0])
+        z = closest(torch.linspace(-40, 40, 100),
+                    [inverse_cdf(p, torch.linspace(-40, 40, 100), cdf) for p in probabilities_to_invert][0])
 
         # print([torch.linspace(-30, 30, 100)[x], torch.linspace(-30, 0, 50)[y], torch.linspace(-30, 30, 100)[z]])
-        points.append([torch.linspace(-30, 30, 100)[x].item(), torch.linspace(-30, 0, 50)[y].item(),
-                       torch.linspace(-30, 30, 100)[z].item()])
+        points.append([torch.linspace(-40, 40, 100)[x].item(), torch.linspace(-40, 0, 50)[y].item(),
+                       torch.linspace(-40, 40, 100)[z].item()])
 
         x_distribution, _ = margins(gradient_image[:, :, z])
         # x_distribution, _ = margins(distribution)[:, :, z]
@@ -588,13 +586,12 @@ def laser_ray_gradient_sampling(image, gradient_image, laser_points=300):
     points = []
     degree = int(image.split('_')[1])
     side = image.split('_')[2]
-    with open(f'renders/data_{degree}_{side}.pkl',
-              'rb') as data_input_file:
-        K = pickle.load(data_input_file)
-        R = pickle.load(data_input_file)
-        t = pickle.load(data_input_file)
-        laser_center = pickle.load(data_input_file)
-        laser_norm = pickle.load(data_input_file)
+
+    K = renders_matrices[image]['K']
+    R = renders_matrices[image]['R']
+    t = renders_matrices[image]['t']
+    laser_center = renders_matrices[image]['laser_center']
+    laser_norm = renders_matrices[image]['laser_norm']
 
     a, b, c = laser_norm
     d = -(a * laser_center[0] + b * laser_center[1] + c * laser_center[2])
@@ -604,7 +601,7 @@ def laser_ray_gradient_sampling(image, gradient_image, laser_points=300):
     _, red_channel = cv.threshold(red_channel, 100, 255, cv.THRESH_BINARY)
 
     camera_position = np.squeeze(np.asarray(- np.matrix(R).T @ t))
-    point_cloud_e = [laser_center, camera_position]
+    point_cloud_e = []  # [laser_center, camera_position]
     point_cloud_u = []  # [laser_center, camera_position]
 
     for u in range(red_channel.shape[0]):
@@ -625,27 +622,34 @@ def laser_ray_gradient_sampling(image, gradient_image, laser_points=300):
 
             points.append([np.squeeze(
                 np.asarray(find_plane_line_intersection([a, b, c, d], camera_position, np.array(laser_point_world)))
-            ), -1])
+            ) * 10, -1])
             break
 
     # print(degree)
-    sampled_points = sample_point_from_plane_gradient([a, b, c, d],
-                                                      degree + (30 if side == 'right' else - 30),
-                                                      model, laser_points)
+    sampled_points, grid_points = sample_point_from_plane_gradient([0, -20, 0], laser_norm, model, laser_points)
+    sampled_points /= 10
+    grid_points /= 10
 
     '''
     plt.figure()
     plt.imshow(gradient_image[:, :, 50])
     plt.show(block=False)
+    
 
-    for point in sampled_points:  # .flatten(start_dim=0, end_dim=1):
+    render_copy = copy.deepcopy(render)
+    for point in grid_points:  # .flatten(start_dim=0, end_dim=1):
         p = project_point(point.numpy().tolist(), R, t, K)
-        cv.drawMarker(render, p, [255, 255, 0], cv.MARKER_DIAMOND, 2, 1)
+        cv.drawMarker(render_copy, p, [255, 255, 0], cv.MARKER_DIAMOND, 2, 1)
+    cv.imshow("test-1", render_copy)
+    cv.waitKey(1)
+
+    '''
+    if debug:
+        for point in sampled_points:  # .flatten(start_dim=0, end_dim=1):
+            p = project_point(point.numpy().tolist(), R, t, K)
+            cv.drawMarker(render, p, [255, 255, 0], cv.MARKER_DIAMOND, 2, 1)
         cv.imshow("test", render)
         cv.waitKey(1)
-
-    cv.waitKey(0)
-    '''
 
     # sampled_points.cpu().detach().numpy()
 
@@ -684,19 +688,21 @@ def laser_ray_gradient_sampling(image, gradient_image, laser_points=300):
                     if red_channel[point[1], point[0]] > 200:
                         break
 
+        '''
         if debug:
             cv.drawMarker(render, p_far_point, [255, 255, 0], cv2.MARKER_DIAMOND, 2, 1)
             cv.drawMarker(render, p, [0, 0, 255], cv.MARKER_CROSS, 2, 2)
             cv.imshow('red', red_channel)
             cv.imshow('foobar', render)
             cv.waitKey(1)
+        '''
 
         if unknown:
-            points.append([[x, y, z], 0])
-            point_cloud_u.append([x, y, z])
+            points.append([[x * 10, y * 10, z * 10], 0])
+            point_cloud_u.append([x * 10, y * 10, z * 10])
         else:
-            points.append([[x, y, z], 1])
-            point_cloud_e.append([x, y, z])
+            points.append([[x * 10, y * 10, z * 10], 1])
+            point_cloud_e.append([x * 10, y * 10, z * 10])
 
     '''
     if debug:
@@ -756,16 +762,6 @@ if GRADIENT_BASED_TRAINING_EPOCHS > 0:
     if device.type != 'cpu':
         test = test.cpu().detach().numpy()
 
-    gradient_based_dataset = CustomDataset(create_gradient_base_dataset(test, 10000, 500))
-
-else:
-    test = None
-
-for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
-    print('EPOCH - gradient based - {}:'.format(epoch_number + 1))
-    # if (epoch - UNIFORM_TRAINING_EPOCHS) == GRADIENT_BASED_TRAINING_EPOCHS / 2:
-    #    gradient_based_dataset = CustomDataset(create_gradient_base_dataset(test, 3000, 300))
-
     if debug:
         plane = test[:, 25, :]
         fig = plt.figure()
@@ -781,6 +777,16 @@ for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
         fig = plt.figure()
         plt.imshow(plane)
         plt.show(block=True)
+
+    gradient_based_dataset = CustomDataset(create_gradient_base_dataset(test, 1000, 500))
+
+else:
+    test = None
+
+for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
+    print('EPOCH - gradient based - {}:'.format(epoch_number + 1))
+    # if (epoch - UNIFORM_TRAINING_EPOCHS) == GRADIENT_BASED_TRAINING_EPOCHS / 2:
+    #    gradient_based_dataset = CustomDataset(create_gradient_base_dataset(test, 3000, 300))
 
     # print(test)
     model.train(True)
