@@ -7,6 +7,9 @@ import torch
 from matplotlib import pyplot as plt
 from scipy import spatial
 from scipy.stats.contingency import margins
+from sklearn.neighbors import KDTree
+
+from inr_model import INR3D
 
 
 def gear(angle):
@@ -246,28 +249,39 @@ def project_point(point, rotation_matrix, translation_vector, camera_intrinsic_m
     return [int(round(camera_p[0, 0] / camera_p[0, 2])), int(round(camera_p[0, 1] / camera_p[0, 2]))]
 
 
-def sample_point_from_plane(plane, degree_threshold, side):
-    a, b, c, d = plane
+def cross_product_proxy(a, b):
+    return np.cross(a, b)
 
-    if side == 'right':
-        y = random.uniform(-3, 0)
-    else:
-        y = random.uniform(-3, 0)  # TODO: update this to use different ranges given the side
 
-    if 45 <= degree_threshold < 135:
-        x = random.uniform(-3, 3)
-        z = -(a * x + b * y + d) / c
-    elif 135 <= degree_threshold < 225:
-        z = random.uniform(-3, 3)
-        x = -(c * z + b * y + d) / a
-    elif 225 <= degree_threshold < 315:
-        x = random.uniform(-3, 3)
-        z = -(a * x + b * y + d) / c
-    else:
-        z = random.uniform(-3, 3)
-        x = -(c * z + b * y + d) / a
+def compute_laser_transformation(laser_center, laser_norm):
+    translation_vector = np.array(laser_center)
+    laser_norm /= np.linalg.norm(laser_norm)
 
-    return [x, y, z]
+    if np.dot(laser_norm, np.array([1, 0, 0])) < 0:
+        laser_norm = -laser_norm
+
+    u = np.array([-laser_norm[1], laser_norm[0], 0]) / np.linalg.norm(np.array([-laser_norm[1], laser_norm[0], 0]))
+    v = (cross_product_proxy(laser_norm, u)) / np.linalg.norm(cross_product_proxy(laser_norm, u))
+
+    R = np.column_stack((u, v, laser_norm))
+
+    return R, translation_vector
+
+
+def sample_point_from_plane(laser_center, laser_norm):
+    R, t = compute_laser_transformation(laser_center, laser_norm)
+
+    x = random.uniform(-2, 2)
+    y = random.uniform(-4, 4)
+    z = 0
+
+    point = np.array([x, y, z, 1])
+    world_point = np.concatenate(
+        [np.concatenate([R, np.matrix(t).T], axis=1),
+         np.array([[0, 0, 0, 1]])], axis=0) @ point
+
+    world_point = np.squeeze(np.asarray(world_point))
+    return [world_point[0] / world_point[3], world_point[1] / world_point[3], world_point[2] / world_point[3]]
 
 
 def inverse_cdf(p, x, cdf):
@@ -290,39 +304,34 @@ def autograd_proxy(output, input_tensor):
     return gradient_image
 
 
-def sample_point_from_plane_gradient(plane, degree_threshold, model, k=100):
+def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100):
     points = []
-    a, b, c, d = plane
-    y = torch.linspace(-30, 0, 50)
+    R, t = compute_laser_transformation(laser_center, laser_norm)
+    x = torch.linspace(-20, 20, 50)
+    y = torch.linspace(-40, 40, 100)
+    z = 0
 
-    if 45 <= degree_threshold < 135 or 225 <= degree_threshold < 315:
-        x = torch.linspace(-30, 30, 100)
+    grid_points = []
+    for i in x:
+        for j in y:
+            point = np.array([i, j, z, 1])
+            world_point = np.concatenate(
+                [np.concatenate([R, np.matrix(t).T], axis=1),
+                 np.array([[0, 0, 0, 1]])], axis=0) @ point
 
-        grid_points = []
-        for i in x:
-            for j in y:
-                z = -(a * i + b * j + d) / c
-                grid_points.append([i, j, z])
+            world_point = np.squeeze(np.asarray(world_point))
+            grid_points.append(
+                [world_point[0] / world_point[3], world_point[1] / world_point[3], world_point[2] / world_point[3]])
 
-        grid_points = torch.tensor(grid_points, dtype=torch.float32)
-    else:
-        z = torch.linspace(-30, 30, 100)
-
-        grid_points = []
-        for i in z:
-            for j in y:
-                x = -(c * i + b * j + d) / a
-                grid_points.append([x, j, i])
-
-        grid_points = torch.tensor(grid_points, dtype=torch.float32)
+    grid_points = torch.tensor(grid_points, dtype=torch.float32)
 
     grid_points_clone = grid_points.clone()
-    grid_points_clone /= 10
+    # grid_points_clone /= 10
     input_tensor = torch.tensor(grid_points, dtype=torch.float32, requires_grad=True)
     output = model(input_tensor)
     gradient_image = autograd_proxy(output, input_tensor)
 
-    output = output.view(100, 50)
+    output = output.view(50, 100)
     output = output.detach().cpu().numpy()
     dbg = False
     if dbg:
@@ -332,21 +341,23 @@ def sample_point_from_plane_gradient(plane, degree_threshold, model, k=100):
         # plt.show(block=True)
         plt.show(block=False)
 
-        plane = gradient_image.view(100, 50)
+        plane = gradient_image.view(50, 100)
         fig = plt.figure()
         plt.imshow(plane)
         # plt.show(block=True)
         plt.show(block=False)
 
-    x_distr, _ = margins(gradient_image.view(100, 50).numpy())
+    x_distr, _ = margins(gradient_image.view(50, 100).numpy())
 
     for _ in range(k):
         x = x_distr.flatten()
         x /= np.sum(x)
         cdf = np.cumsum(x)
         probabilities_to_invert = np.random.uniform(0, 1, 1)
-        x = closest(torch.linspace(-30, 30, 100),
-                    [inverse_cdf(p, torch.linspace(-30, 30, 100), cdf) for p in probabilities_to_invert][0])
+        # print(np.searchsorted(cdf, 0))
+        # print(np.searchsorted(cdf, 1))
+        x = closest(torch.linspace(-20, 20, 50),
+                    [inverse_cdf(p, torch.linspace(-20, 20, 50), cdf) for p in probabilities_to_invert][0])
 
         '''
         plt.figure()
@@ -358,14 +369,14 @@ def sample_point_from_plane_gradient(plane, degree_threshold, model, k=100):
         plt.show(block=False)
         '''
 
-        y_distr = margins(gradient_image.view(100, 50)[x, :].numpy())[0]
+        y_distr = margins(gradient_image.view(50, 100)[x, :].numpy())[0]
 
         y = y_distr.flatten()
         y /= np.sum(y)
         cdf = np.cumsum(y)
         probabilities_to_invert = np.random.uniform(0, 1, 1)
-        y = closest(torch.linspace(-30, 0, 50),
-                    [inverse_cdf(p, torch.linspace(-30, 0, 50), cdf) for p in probabilities_to_invert][0])
+        y = closest(torch.linspace(-40, 40, 100),
+                    [inverse_cdf(p, torch.linspace(-40, 40, 100), cdf) for p in probabilities_to_invert][0])
 
         '''
         plt.figure()
@@ -377,10 +388,11 @@ def sample_point_from_plane_gradient(plane, degree_threshold, model, k=100):
         plt.show(block=False)
         '''
 
-        x_distr = margins(gradient_image.view(100, 50)[:, y].numpy())[0]
+        x_distr = margins(gradient_image.view(50, 100)[:, y].numpy())[0]
 
-        points.append(grid_points_clone.view(100, 50, 3)[x, y].cpu().numpy())
+        points.append(grid_points_clone.view(50, 100, 3)[x, y].cpu().numpy())
 
     points = np.array(points)
     points = torch.from_numpy(points)
-    return torch.tensor(points, dtype=torch.float32, device='cpu')  # grid_points_clone
+    return torch.tensor(points, dtype=torch.float32, device='cpu'), grid_points_clone
+
