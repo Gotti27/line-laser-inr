@@ -53,6 +53,8 @@ load = True
 if debug and load:
     model.load_state_dict(torch.load('3d-model', map_location=device))
 
+raw_external = raw_internal = raw_unknown = []
+
 
 def load_render():
     renders = {}
@@ -248,6 +250,11 @@ def create_uniform_dataset(silhouette_points=3000, laser_points=300):
 
     print("Uniform raw dataset created - executing KNN")
 
+    global raw_external, raw_internal, raw_unknown
+    raw_external = [[p_p * 10 for p_p in p] for p in external]
+    raw_internal = [[p_p * 10 for p_p in p] for p in internal]
+    raw_unknown = [[p_p * 10 for p_p in p] for p in unknown]
+
     external, internal = knn_point_classification([[p_p * 10 for p_p in p] for p in external],
                                                   [[p_p * 10 for p_p in p] for p in internal],
                                                   [[p_p * 10 for p_p in p] for p in unknown], 10)
@@ -278,16 +285,9 @@ def create_gradient_base_dataset(gradient_image, silhouette_points=3000, laser_p
     internal = []
     unknown = []
 
-    # FIXME uniform dataset concatenation
-
-    if uniform_dataset_train is not None:
-        for point, label in uniform_dataset_train.dataset.data:
-            if label == 1:
-                external.append(point.detach().cpu().numpy())
-            else:
-                internal.append(point.detach().cpu().numpy())
-    '''
-    '''
+    internal.extend(raw_internal)
+    external.extend(raw_external)
+    unknown.extend(raw_unknown)
 
     inputs = np.array([]).reshape(0, 3)
 
