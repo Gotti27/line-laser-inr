@@ -285,7 +285,10 @@ def sample_point_from_plane(laser_center, laser_norm):
 
 
 def inverse_cdf(p, x, cdf):
-    return x[np.searchsorted(cdf, p)]
+    index = np.searchsorted(cdf, p)
+    if index == len(x):
+        index -= 1
+    return x[index]
 
 
 def closest(lst, k):
