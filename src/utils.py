@@ -422,3 +422,131 @@ def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100):
     return torch.from_numpy(np.array(points)), grid_points_clone
 
 
+def abs_model_evaluation(model: INR3D, points: np.ndarray):
+    with torch.no_grad():
+        densities = model(torch.tensor(points, dtype=torch.float32))
+        outputs = abs(densities.detach().cpu().numpy())
+    return np.sum(outputs) / len(points)
+
+
+def find_optimal_point_parallel(model, vertexes, normals, epsilon=1e-5, max_iter=100, dbg=False):
+    a = np.full(len(vertexes), -0.2, dtype=np.float32)
+    b = np.full(len(vertexes), 0.2, dtype=np.float32)
+    num_points = len(vertexes)
+
+    optimal_points = [[vertexes[i], 1] for i in range(len(vertexes))]
+
+    for _ in range(max_iter):
+        m = (a + b) / 2.0
+
+        points_low = vertexes + a[:, np.newaxis] * normals
+        points_mid = vertexes + m[:, np.newaxis] * normals
+        points_high = vertexes + b[:, np.newaxis] * normals
+
+        points = np.vstack((points_low, points_mid, points_high))
+        values = model(torch.from_numpy(points).type(torch.float32).to(
+            "cuda:0" if torch.cuda.is_available() else "cpu"
+        )).detach().cpu()
+
+        val_a = values[:num_points]
+        val_m = values[num_points:2 * num_points]
+        val_b = values[2 * num_points:]
+
+        mask = np.abs(val_m) < epsilon
+        for i, flag in enumerate(mask):
+            if flag and optimal_points[i][1] == 1:
+                optimal_points[i] = [points_mid[i], 0]
+
+        sign_low = np.sign(val_a).flatten()
+        sign_mid = np.sign(val_m).flatten()
+        sign_high = np.sign(val_b).flatten()
+
+        for i in range(len(a)):
+            if sign_low[i] != sign_mid[i]:
+                b[i] = m[i]
+            elif sign_high[i] != sign_mid[i]:
+                a[i] = m[i]
+            else:
+                a[i] *= 1.2
+                b[i] *= 1.2
+
+        if dbg:
+            plotter = pv.Plotter()
+            plotter.add_points(pv.PolyData(points_low), color='red')
+            plotter.add_points(pv.PolyData(points_high), color='blue')
+            plotter.add_points(pv.PolyData(points_mid), color='green')
+            plotter.show()
+
+    return optimal_points
+
+
+def mae_model_evaluation(model: INR3D, points: np.ndarray, normals: np.ndarray):
+    abs_values = []
+    optimal_points = find_optimal_point_parallel(model, points,
+                                                 normals,
+                                                 epsilon=0.0001,
+                                                 max_iter=30,
+                                                 dbg=False)
+    print("converged on mesh: ", sum([1 for o in optimal_points if o[1] == 0]), len(points))
+    errors = []
+    for i in range(len(points)):
+        point = points[i]
+        if optimal_points[i][1] == 0:
+            optimal_point = optimal_points[i][0]
+            # print(math.dist(point, optimal_point))
+            error = math.dist(point, optimal_point)
+            # if error > 5:
+            #    error = 5
+            abs_values.append(error)
+            errors.append(error)
+        else:
+            errors.append(np.nan)
+            # squares.append(1 ** 2)
+
+    return sum(abs_values) / len(points), sum([1 for o in optimal_points if o[1] == 0]) / len(points)
+
+
+def rmse_model_evaluation(model: INR3D, points: np.ndarray, normals: np.ndarray, dbg=False):
+    squares = []
+    optimal_points = find_optimal_point_parallel(model, points,
+                                                 normals,
+                                                 epsilon=0.0001,
+                                                 max_iter=30,
+                                                 dbg=False)
+    print("converged on mesh: ", sum([1 for o in optimal_points if o[1] == 0]), len(points))
+    errors = []
+    for i in range(len(points)):
+        point = points[i]
+        if optimal_points[i][1] == 0:
+            optimal_point = optimal_points[i][0]
+            error = math.dist(point, optimal_point)
+            # if error > 5:
+            #    error = 5
+            squares.append(error ** 2)
+            errors.append(error)
+        else:
+            errors.append(np.nan)
+    '''
+    p1 = pv.Plotter()
+    p1.add_points(pv.PolyData(optimal_points), color='red')
+    p1.add_points(pv.PolyData(points), color='blue')
+    # p1.add_points(pv.PolyData(old_vertices))
+    # p1.add_arrows(points, normals, color='black')
+    p1.add_axes()
+    p1.show_grid()
+    p1.show()
+    '''
+
+    if dbg:
+        point_cloud = pv.PolyData(points)
+        point_cloud['errors'] = [min(e, 2.) for e in errors]
+        cmap = plt.cm.plasma
+        cmap.set_bad(color='green')
+        plotter = pv.Plotter()
+        plotter.add_mesh(point_cloud, scalars='errors', cmap=cmap, nan_color='green', point_size=10)
+        plotter.add_scalar_bar(title='Error Value', n_labels=5)
+
+        plotter.show()
+
+    return math.sqrt(sum(squares) / len(points)), np.array(errors), \
+        sum([1 for o in optimal_points if o[1] == 0]) / len(points)
