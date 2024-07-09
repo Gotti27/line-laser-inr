@@ -116,27 +116,58 @@ def knn_point_classification(external, internal, unknown, k=5):
 
 
 def pure_knn_point_classification(external, internal, unknown, k=5):
-    # in pure knn internal list should be empty
     ret_external = [] + external
     ret_internal = [] + internal
     all_points = [] + external + internal + unknown
-    kd_tree = spatial.KDTree(all_points)
-    _, neighbors = kd_tree.query(unknown, k=k)
-
     all_labels = [1 for _ in external] + [-1 for _ in internal] + [0 for _ in unknown]
+    kd_tree = KDTree(np.array(all_points))
+    distances, neighbors = kd_tree.query(unknown, k=k, return_distance=True)
+
     for i, u in enumerate(unknown):
         point_neighbors = neighbors[i]
         if k == 1:
             point_class = [all_labels[point_neighbors]]
+            distances_sum = distances[i]
         else:
             point_class = [all_labels[n] for n in point_neighbors]
+            distances_sum = sum(distances[i])
 
-        internal_score = len([p for p in point_class if p == -1])
-        external_score = len([p for p in point_class if p == 1])
-        unknown_score = len([p for p in point_class if p == 0])
+        if sum(distances[i]) == 0:
+            external_score = len(
+                [p for index, p in enumerate(point_class) if p == 1])
+            unknown_score = len(
+                [p for index, p in enumerate(point_class) if p == 0])
+            internal_score = len(
+                [p for index, p in enumerate(point_class) if p == -1])
+        else:
+            external_score = len(
+                [(1 - (distances[index] / distances_sum)) * p for index, p in enumerate(point_class) if p == 1])
+            unknown_score = len(
+                [(1 - (distances[index] / distances_sum)) * p for index, p in enumerate(point_class) if p == 0])
+            internal_score = len(
+                [(1 - (distances[index] / distances_sum)) * p for index, p in enumerate(point_class) if p == -1])
 
-        # FIXME: this condition has to be refactored
-        if unknown_score > external_score or internal_score > unknown_score:
+        if unknown_score > external_score:
+            ret_internal.append(u)
+        else:
+            ret_external.append(u)
+        '''
+        if external_score >= internal_score and external_score >= unknown_score >= internal_score:
+            ret_external.append(u)
+        else:
+            ret_internal.append(u)
+        '''
+
+        '''
+        if external_score > unknown_score or external_score > internal_score:
+            ret_external.append(u)
+        else:
+            ret_internal.append(u)
+        '''
+
+    return ret_external, ret_internal
+
+
             ret_internal.append(u)
         else:
             ret_external.append(u)
@@ -272,7 +303,14 @@ def sample_point_from_plane(laser_center, laser_norm):
     R, t = compute_laser_transformation(laser_center, laser_norm)
 
     x = random.uniform(-2, 2)
-    y = random.uniform(-4, 4)
+    y = random.uniform(-6, 6)
+    '''
+    '''
+    if random.choice([True, False]):
+        y = random.uniform(-6, -1)
+    else:
+        y = random.uniform(1, 6)
+
     z = 0
 
     point = np.array([x, y, z, 1])
@@ -299,19 +337,16 @@ def autograd_proxy(output, input_tensor):
     grad_outputs = torch.autograd.grad(outputs=output, inputs=input_tensor, grad_outputs=torch.ones_like(output),
                                        is_grads_batched=False)[0]
 
-    if grad_outputs.device != 'cpu':
-        grad_outputs.detach().cpu()
-
     gradient_image = torch.tensor([math.sqrt((x ** 2) + (y ** 2) + (z ** 2)) for [x, y, z] in grad_outputs],
-                                  dtype=torch.float32, device='cpu')
-    return gradient_image
+                                  dtype=torch.float32)
+    return gradient_image.cpu()
 
 
 def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100):
     points = []
     R, t = compute_laser_transformation(laser_center, laser_norm)
-    x = torch.linspace(-20, 20, 50)
-    y = torch.linspace(-40, 40, 100)
+    x = torch.linspace(-20, 20, 50, device='cpu')
+    y = torch.linspace(-60, 60, 100, device='cpu')
     z = 0
 
     grid_points = []
@@ -330,9 +365,9 @@ def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100):
 
     grid_points_clone = grid_points.clone()
     # grid_points_clone /= 10
-    input_tensor = torch.tensor(grid_points, dtype=torch.float32, requires_grad=True)
-    output = model(input_tensor)
-    gradient_image = autograd_proxy(output, input_tensor)
+    grid_points = grid_points.requires_grad_(True)
+    output = model(grid_points)
+    gradient_image = autograd_proxy(output, grid_points)
 
     output = output.view(50, 100)
     output = output.detach().cpu().numpy()
@@ -350,6 +385,7 @@ def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100):
         # plt.show(block=True)
         plt.show(block=False)
 
+    '''
     x_distr, _ = margins(gradient_image.view(50, 100).numpy())
 
     for _ in range(k):
@@ -359,18 +395,9 @@ def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100):
         probabilities_to_invert = np.random.uniform(0, 1, 1)
         # print(np.searchsorted(cdf, 0))
         # print(np.searchsorted(cdf, 1))
+        # FIXME: this might be broken
         x = closest(torch.linspace(-20, 20, 50),
                     [inverse_cdf(p, torch.linspace(-20, 20, 50), cdf) for p in probabilities_to_invert][0])
-
-        '''
-        plt.figure()
-        plt.plot(x)
-        plt.show(block=False)
-
-        plt.figure()
-        plt.plot(cdf)
-        plt.show(block=False)
-        '''
 
         y_distr = margins(gradient_image.view(50, 100)[x, :].numpy())[0]
 
@@ -381,21 +408,17 @@ def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100):
         y = closest(torch.linspace(-40, 40, 100),
                     [inverse_cdf(p, torch.linspace(-40, 40, 100), cdf) for p in probabilities_to_invert][0])
 
-        '''
-        plt.figure()
-        plt.plot(y)
-        plt.show(block=False)
-
-        plt.figure()
-        plt.plot(cdf)
-        plt.show(block=False)
-        '''
-
         x_distr = margins(gradient_image.view(50, 100)[:, y].numpy())[0]
 
         points.append(grid_points_clone.view(50, 100, 3)[x, y].cpu().numpy())
+    '''
 
-    points = np.array(points)
-    points = torch.from_numpy(points)
-    return torch.tensor(points, dtype=torch.float32, device='cpu'), grid_points_clone
+    points = gibbs.gibbs_sampling_2d(gradient_image.view(50, 100).detach().cpu().numpy(), k, [0, 0, 0],
+                                     grid_points_clone)
+    points = [p for p in points if
+              ((-40 <= p[0] <= -10 or 10 <= p[0] <= 40) and -40 <= p[2] <= 40) or
+              ((-40 <= p[2] <= -10 or 10 <= p[2] <= 40) and -40 <= p[0] <= 40)]
+
+    return torch.from_numpy(np.array(points)), grid_points_clone
+
 
