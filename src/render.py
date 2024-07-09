@@ -15,10 +15,11 @@ mi.set_variant('llvm_ad_rgb')
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
 # Execution flags
-testing = True  # Just fooling the static analyzer :)
-do_all_renders = False
+testing = False  # Just fooling the static analyzer :)
+do_all_renders = True
 laser_degree_delta = 30
-target = 'teapot.ply'
+target = 'teapot'
+target_mesh = target + '.ply'
 
 # Calculating Camera Intrinsic parameters
 
@@ -44,7 +45,7 @@ print(K)
 
 if testing:
     testing_angle = 45
-    scene = mi.load_file("scenes/gear_right.xml", angle=testing_angle, target=target,
+    scene = mi.load_file("scenes/gear_right.xml", angle=testing_angle, target=target_mesh,
                          laser_angle_delta=laser_degree_delta)
 
     image = mi.render(scene, spp=256)
@@ -109,23 +110,23 @@ if testing:
 def do_renders(side):
     for i in range(360):
         rendered_image = mi.render(
-            mi.load_file(f"scenes/gear_{side}.xml", angle=i, target=target, laser_angle_delta=laser_degree_delta),
+            mi.load_file(f"scenes/gear_{side}.xml", angle=i, target=target_mesh, laser_angle_delta=laser_degree_delta),
             spp=256)
         cv.imshow("rendering progress", np.array(rendered_image))
         cv.waitKey(1)
-        mi.util.write_bitmap(f"renders/data_{i}_{side}_render.exr", rendered_image)
+        mi.util.write_bitmap(f"renders/{target}/data_{i}_{side}_render.exr", rendered_image)
 
         print(f"{round(i / 360 * 100)}%")
 
 
 if do_all_renders:
-    if not os.path.exists("renders"):
-        os.mkdir('renders')
+    if not os.path.exists(f"renders/{target}"):
+        os.makedirs(f'renders/{target}')
     do_renders('right')
     do_renders('left')
     time.sleep(1)
 
-image_folder = 'renders'
+image_folder = f'renders/{target}'
 
 # process right images
 right_images = [img for img in os.listdir(image_folder) if img.endswith(".exr") and ('right' in img)]
@@ -157,7 +158,7 @@ for degree, image in enumerate(right_images):
     print("laser center: ", laser_center)
     print("laser norm: ", laser_norm)
 
-    with open(f'renders/data_{degree}_right.pkl', 'wb') as data_output_file:
+    with open(f'renders/{target}/data_{degree}_right.pkl', 'wb') as data_output_file:
         pickle.dump(K, data_output_file)
         pickle.dump(R, data_output_file)
         pickle.dump(t, data_output_file)
@@ -227,7 +228,7 @@ for degree, image in enumerate(left_images):
     print("laser center: ", laser_center)
     print("laser norm: ", laser_norm)
 
-    with open(f'renders/data_{degree}_left.pkl', 'wb') as data_output_file:
+    with open(f'renders/{target}/data_{degree}_left.pkl', 'wb') as data_output_file:
         pickle.dump(K, data_output_file)
         pickle.dump(R, data_output_file)
         pickle.dump(t, data_output_file)

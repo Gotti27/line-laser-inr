@@ -47,7 +47,7 @@ class INR3D(nn.Module):
         x = nn.functional.relu(self.fc1(x))
         x = nn.functional.relu(self.fc2(x))
         x = nn.functional.relu(self.fc3(x))
-        x = nn.functional.tanh(self.out(x))
+        x = self.out(x)  # nn.functional.tanh(self.out(x))
 
         return x
 

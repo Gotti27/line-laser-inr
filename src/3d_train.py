@@ -1,19 +1,23 @@
 import argparse
 import os
-import pickle
+import time
 from datetime import datetime
 
-import pyvista as pv
 import torch.utils.data
-from torch.utils.data import Dataset
 from torch.utils.tensorboard import SummaryWriter
 
-from inr_model import sign_loss
+from dataset import INRPointsDataset, load_renders
 from utils import *
 
-UNIFORM_TRAINING_EPOCHS = 100
-GRADIENT_BASED_TRAINING_EPOCHS = 50
+UNIFORM_ITERATIONS = 10
+UNIFORM_TRAINING_EPOCHS = 20
 
+GRADIENT_ITERATIONS = 0
+GRADIENT_BASED_TRAINING_EPOCHS = 20
+
+target = 'teapot'
+
+np.bool = np.bool_
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 pv.global_theme.allow_empty_mesh = True
 
@@ -35,12 +39,16 @@ if debug:
 
 print(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
 
-target = 'teapot'
+mesh = pv.read(f'scenes/meshes/{target}.ply')
+mesh = mesh.rotate_z(180)
+mesh = mesh.rotate_x(90)
+mesh = mesh.scale(10)
+mesh.compute_normals(inplace=True)
+
 image_folder = f'renders/{target}'
 images = [img for img in os.listdir(image_folder) if img.endswith(".exr")]
 images.sort(key=lambda name: int(name.split('_')[1]))
 
-# set up the model
 torch.manual_seed(41)
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.set_default_device(device)
@@ -53,29 +61,7 @@ load = True
 if debug and load:
     model.load_state_dict(torch.load('3d-model', map_location=device))
 
-
-def load_render():
-    renders = {}
-
-    for image in images:
-        degree = image.split('_')[1]
-        side = image.split('_')[2]
-        with open(f'renders/{target}/data_{degree}_{side}.pkl', 'rb') as data_input_file:
-            K = pickle.load(data_input_file)
-            R = pickle.load(data_input_file)
-            t = pickle.load(data_input_file)
-            laser_center = pickle.load(data_input_file)
-            laser_norm = pickle.load(data_input_file)
-
-        render_depth = cv.imread(os.path.join(image_folder, image), cv.IMREAD_UNCHANGED)
-        renders[image] = {'K': K, 'R': R, 't': t,
-                          'render': render_depth,
-                          'laser_center': laser_center, 'laser_norm': laser_norm
-                          }
-    return renders
-
-
-renders_matrices = load_render()
+renders_matrices = load_renders(images, target)
 
 
 def silhouette_sampling(point):
@@ -87,15 +73,7 @@ def silhouette_sampling(point):
         render_depth = renders_matrices[image]['render']
 
         p = project_point([x, y, z], R, t, K)
-        # render_depth = renders_matrices[image]  # cv.imread(os.path.join(image_folder, image), cv.IMREAD_UNCHANGED)
-        # render = np.array(render_depth[:, :, 0:3])
         depth = render_depth[:, :, 3]
-        '''
-        if debug:
-            cv.drawMarker(render, p, [0, 255, 0], cv.MARKER_CROSS, 2, 1)
-            cv.imshow('foobar', render)
-            cv.waitKey(1)
-        '''
 
         is_outside = p[0] < 0 or p[0] >= 256 or p[1] < 0 or p[1] >= 256
         if is_outside or depth[p[1], p[0]] == 0:
@@ -117,37 +95,35 @@ def laser_ray_sampling(image, laser_points):
     a, b, c = laser_norm
     d = -(a * laser_center[0] + b * laser_center[1] + c * laser_center[2])
 
-    render = np.array(cv.imread(os.path.join(image_folder, image), cv.IMREAD_UNCHANGED)[:, :, 0:3])
+    render = renders_matrices[image]['render'][:, :, 0:3]
     red_channel = render[:, :, 2] * 255
     _, red_channel = cv.threshold(red_channel, 100, 255, cv.THRESH_BINARY)
 
     camera_position = np.squeeze(np.asarray(- np.matrix(R).T @ t))
-    point_cloud_e = []  # [laser_center, camera_position]
-    point_cloud_u = []  # [laser_center, camera_position]
+    point_cloud_e = []
+    point_cloud_u = []
 
-    for u in range(red_channel.shape[0]):
-        for v in range(red_channel.shape[1]):
-            if not red_channel[u][v]:
-                continue
+    for [u, v] in np.column_stack(np.where(red_channel > 0)):
+        laser_point_camera = np.array(
+            [v - (red_channel.shape[1] / 2), u - (red_channel.shape[0] / 2), K[0][0], 1])
+        laser_point_world = np.concatenate([
+            np.concatenate([R.T, np.array(- R.T @ t).reshape(3, 1)], axis=1),
+            np.array([[0, 0, 0, 1]])
+        ], axis=0) @ laser_point_camera
 
-            laser_point_camera = np.array(
-                [v - (red_channel.shape[1] / 2), u - (red_channel.shape[0] / 2), K[0][0], 1])
-            laser_point_world = np.concatenate([
-                np.concatenate([R.T, np.array(- R.T @ t).reshape(3, 1)], axis=1),
-                np.array([[0, 0, 0, 1]])
-            ], axis=0) @ laser_point_camera
+        laser_point_world = [laser_point_world[0] / laser_point_world[3],
+                             laser_point_world[1] / laser_point_world[3],
+                             laser_point_world[2] / laser_point_world[3]]
 
-            laser_point_world = [laser_point_world[0] / laser_point_world[3],
-                                 laser_point_world[1] / laser_point_world[3],
-                                 laser_point_world[2] / laser_point_world[3]]
+        points.append([np.squeeze(
+            np.asarray(find_plane_line_intersection([a, b, c, d], camera_position, np.array(laser_point_world)))
+        ), -1])
 
-            points.append([np.squeeze(
-                np.asarray(find_plane_line_intersection([a, b, c, d], camera_position, np.array(laser_point_world)))
-            ), -1])
-            break
-
-    for _ in range(laser_points):  # here
+    for _ in range(laser_points):
         x, y, z = sample_point_from_plane([0, -2, 0], laser_norm)
+        # FIXME: temporary condition to prevent central cluster on unknown points
+        if x < -4 or x > 4 or z < -4 or z > 4:
+            continue
         p = project_point([x, y, z], R, t, K)
         p_laser_center = project_point([laser_center[0], laser_center[1], laser_center[2]], R, t, K)
 
@@ -197,7 +173,6 @@ def laser_ray_sampling(image, laser_points):
             points.append([[x, y, z], 1])
             point_cloud_e.append([x, y, z])
 
-    # cv.waitKey(0)
     '''
     if debug:
         mesh = pv.read('scenes/meshes/teapot.ply')
@@ -240,17 +215,30 @@ def create_uniform_dataset(silhouette_points=3000, laser_points=300):
             else:
                 internal.append(point)
 
+    '''
+    if debug:
+        with open(f'dataset-{target}.pkl', 'wb') as f:
+            pickle.dump(external, f)
+            pickle.dump(unknown, f)
+            pickle.dump(internal, f)
+        
+        with open(f'dataset-{target}.pkl', 'rb') as f:
+            external = pickle.load(f)
+            unknown = pickle.load(f)
+            internal = pickle.load(f)
+    '''
+    print("Uniform raw dataset created - executing KNN")
     if debug:
         point_cloud = pv.PolyData([[p_p * 10 for p_p in p] for p in unknown])
         point_cloud.plot(eye_dome_lighting=True, show_axes=True, show_bounds=True)
         point_cloud = pv.PolyData([[p_p * 10 for p_p in p] for p in external])
         point_cloud.plot(eye_dome_lighting=True, show_axes=True, show_bounds=True)
 
-    print("Uniform raw dataset created - executing KNN")
-
-    external, internal = knn_point_classification([[p_p * 10 for p_p in p] for p in external],
-                                                  [[p_p * 10 for p_p in p] for p in internal],
-                                                  [[p_p * 10 for p_p in p] for p in unknown], 10)
+    print(math.floor(math.sqrt(len(external) + len(internal) + len(unknown))))
+    external, internal = pure_knn_point_classification([[p_p * 10 for p_p in p] for p in external],
+                                                       [[p_p * 10 for p_p in p] for p in internal],
+                                                       [[p_p * 10 for p_p in p] for p in unknown],
+                                                       30)
 
     print("Uniform dataset created")
 
@@ -266,39 +254,38 @@ def create_uniform_dataset(silhouette_points=3000, laser_points=300):
     labels = torch.tensor([[1] for _ in external] + [[-1] for _ in internal], dtype=torch.float32,
                           requires_grad=True, device=device)
 
+    print(f"Total number of points in the dataset {len(inputs)}")
     dataset = [
-        [torch.tensor(torch.from_numpy(inputs[i]), dtype=torch.float32, requires_grad=True, device=device), labels[i]]
+        [torch.from_numpy(inputs[i]).type(torch.float32).requires_grad_(True).to(device), labels[i]]
         for i
         in range(len(inputs))]
-    return dataset  # torch.tensor(dataset, device=device)
+    return dataset
 
 
-def create_gradient_base_dataset(gradient_image, silhouette_points=3000, laser_points=300):
+def create_gradient_base_dataset(gradient_image_d, silhouette_points=3000, laser_points=300):
     external = []
     internal = []
     unknown = []
 
-    # FIXME uniform dataset concatenation
-
-    if uniform_dataset_train is not None:
-        for point, label in uniform_dataset_train.dataset.data:
-            if label == 1:
-                external.append(point.detach().cpu().numpy())
-            else:
-                internal.append(point.detach().cpu().numpy())
-    '''
-    '''
-
     inputs = np.array([]).reshape(0, 3)
 
-    for point in sample_from_gradient_image(gradient_image, silhouette_points):
+    x = torch.linspace(-40, 40, 100, dtype=torch.float32, device='cpu')  # + offset
+    y = torch.linspace(-40, 0, 50, dtype=torch.float32, device='cpu')  # + offset
+    z = torch.linspace(-40, 40, 100, dtype=torch.float32, device='cpu')  # + offset
+    X, Y, Z = torch.meshgrid(x, y, z)
+    grid = torch.stack((X.flatten(), Y.flatten(), Z.flatten()), dim=-1)
+
+    # for point in sample_from_gradient_image(gradient_image, silhouette_points):
+    start = time.time()
+    print("started silhouette sampling")
+    for point in gibbs.gibbs_sampling_3d(gradient_image_d, silhouette_points, [0, 0, 0], grid):
         label = silhouette_sampling([p_p / 10 for p_p in point])
         if label == 1:
             external.append(point)
         else:
             unknown.append(point)
-    '''
-    '''
+    print("finished silhouette sampling", time.time() - start)
+    start = time.time()
 
     sampling_list = images.copy()
     for _ in range(360 * 2):
@@ -306,7 +293,7 @@ def create_gradient_base_dataset(gradient_image, silhouette_points=3000, laser_p
         # FIXME: image = random.sample(sampling_list, 1)[0]
         # image = sampling_list[91 + 30]  # 90
         # print(image)
-        for point, label in laser_ray_gradient_sampling(image, gradient_image, laser_points):
+        for point, label in laser_ray_gradient_sampling(image, gradient_image_d, laser_points):
             if label == 1:
                 external.append(point)
             elif label == 0:
@@ -315,14 +302,14 @@ def create_gradient_base_dataset(gradient_image, silhouette_points=3000, laser_p
                 internal.append(point)
         # print(f"{image} done")
 
+    print("images done", time.time() - start)
     if debug:
         point_cloud = pv.PolyData(unknown)
         point_cloud.plot(eye_dome_lighting=True)
         point_cloud = pv.PolyData(external)
         point_cloud.plot(eye_dome_lighting=True)
 
-    external, internal = knn_point_classification(external, internal, unknown, 5)
-    # external, internal = pure_knn_point_classification(external, internal, unknown, 5)
+    external, internal = pure_knn_point_classification(external, internal, unknown, 30)
 
     if debug:
         point_cloud = pv.PolyData(internal)
@@ -340,25 +327,7 @@ def create_gradient_base_dataset(gradient_image, silhouette_points=3000, laser_p
         [torch.tensor(torch.from_numpy(inputs[i]), dtype=torch.float32, requires_grad=True, device=device), labels[i]]
         for i
         in range(len(inputs))]
-    return dataset  # torch.tensor(dataset, device=device)
-
-
-class CustomDataset(Dataset):
-    def __init__(self, data):
-        self.data = data
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        data, label = self.data[idx]
-        return data, label
-
-
-uniform_dataset = CustomDataset(create_uniform_dataset(30000, 1000))
-
-uniform_dataset_train, uniform_dataset_val = torch.utils.data.random_split(uniform_dataset, [.8, .2],
-                                                                           generator=torch.Generator(device=device))
+    return dataset
 
 
 def train_one_epoch_uniformly(epoch_index, tb_writer):
@@ -366,7 +335,6 @@ def train_one_epoch_uniformly(epoch_index, tb_writer):
     last_loss = 0.
 
     for batch_index, data in enumerate(training_loader):
-        # Every data instance is an input + label pair
         inputs, labels = data
 
         optimizer.zero_grad()
@@ -377,10 +345,8 @@ def train_one_epoch_uniformly(epoch_index, tb_writer):
 
         running_loss += loss.item()
 
-        # TODO print(f"batch {batch_index} done, loss: {loss.item()}", end='\r')
-
         if batch_index == len(training_loader) - 1:
-            last_loss = running_loss / len(training_loader)  # loss per batch
+            last_loss = running_loss / len(training_loader)
             print('  batch {} loss: {}'.format(batch_index + 1, last_loss))
             tb_x = epoch_index * 100 + batch_index + 1
             tb_writer.add_scalar('Loss/train', last_loss, tb_x)
@@ -389,202 +355,81 @@ def train_one_epoch_uniformly(epoch_index, tb_writer):
     return last_loss
 
 
-training_loader = torch.utils.data.DataLoader(uniform_dataset_train, batch_size=64, shuffle=True,
-                                              generator=torch.Generator(device=device), num_workers=0)
+for iteration in range(UNIFORM_ITERATIONS):
+    print(f"iteration: {iteration}")
+    uniform_dataset = INRPointsDataset(create_uniform_dataset(200000, 50))
 
-validation_loader = torch.utils.data.DataLoader(uniform_dataset_val, batch_size=64, shuffle=True,
-                                                generator=torch.Generator(device=device), num_workers=0)
-
-for epoch in range(UNIFORM_TRAINING_EPOCHS):
-    print('EPOCH {}:'.format(epoch_number + 1))
-
-    model.train(True)
-    avg_loss = train_one_epoch_uniformly(epoch_number, writer)
-
-    running_vloss = 0.0
-    model.eval()
-    with torch.no_grad():
-        for batch_index, data in enumerate(validation_loader):
-            inputs, labels = data
-
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            running_vloss += sign_loss(outputs, labels)
-
-        avg_vloss = running_vloss / (len(validation_loader) + 1)
-
-    print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
-
-    # print('LOSS train {} valid {}'.format(avg_loss, 'unknown'))
-    # Log the running loss averaged per batch
-    # for both training and validation
-    writer.add_scalars('Training vs. Validation Loss',
-                       {'Training': avg_loss},
-                       epoch_number + 1)
-    writer.flush()
-
-    # Track best performance, and save the model's state
     '''
-    if avg_vloss < best_validation_loss:
-        best_validation_loss = avg_vloss
-        model_path = 'models/model_{}_{}'.format(timestamp, epoch_number)
-        torch.save(model.state_dict(), model_path)
+    
+    uniform_dataset_train, uniform_dataset_val = torch.utils.data.random_split(uniform_dataset, [.8, .2],
+                                                                               generator=torch.Generator(device=device))
+    '''
+    uniform_dataset_train = uniform_dataset
+
+    training_loader = torch.utils.data.DataLoader(uniform_dataset_train, batch_size=64, shuffle=True,
+                                                  generator=torch.Generator(device=device), num_workers=0)
+    '''
+    validation_loader = torch.utils.data.DataLoader(uniform_dataset_val, batch_size=64, shuffle=True,
+                                                    generator=torch.Generator(device=device), num_workers=0)
     '''
 
-    epoch_number += 1
+    for epoch in range(UNIFORM_TRAINING_EPOCHS):
+        print('EPOCH {}:'.format(epoch_number + 1))
+
+        model.train(True)
+        avg_loss = train_one_epoch_uniformly(epoch_number, writer)
+
+        running_vloss = 0.0
+        model.eval()
+        with torch.no_grad():
+            '''
+            eval_err = rmse_model_evaluation(model, mesh.vertices, mesh.vertex_normals)
+            print('LOSS train {} valid {}'.format(avg_loss, eval_err))  # abs_model_evaluation(model, mesh.points)
+            '''
+            print('LOSS train {} valid {}'.format(avg_loss, 'unknown'))
+
+        writer.add_scalars('Training vs. Validation Loss',
+                           {'Training': avg_loss},
+                           epoch_number + 1)
+        writer.flush()
+
+        '''
+        if avg_vloss < best_validation_loss:
+            best_validation_loss = avg_vloss
+            model_path = 'models/model_{}_{}'.format(timestamp, epoch_number)
+            torch.save(model.state_dict(), model_path)
+        '''
+        epoch_number += 1
+
+    abs_error = abs_model_evaluation(model, mesh.points)
+    mae_error = mae_model_evaluation(model, mesh.points, mesh.active_normals)
+    rmse_error = rmse_model_evaluation(model, mesh.points, mesh.active_normals)
+    print(f"EVAL ERR: {abs_error} {mae_error[0]} {rmse_error[0]} {rmse_error[2]}")
+    with open("history-uniform.txt", "a+") as history:
+        history.write(f"{abs_error} {mae_error[0]} {rmse_error[0]} {rmse_error[2]}\n")
 
 
 def compute_gradient_image_from_model():
-    # gradient_image = torch.empty(0, dtype=torch.float32,
-    #                             device=device)  # torch.tensor([], dtype=torch.float32,
-    #            device=device)  # torch.zeros([100, 50, 100], dtype=torch.float32, device=device)  # np.zeros([100, 50, 100])
-
-    x = torch.linspace(-40, 40, 100, device=device)
-    y = torch.linspace(-40, 0, 50, device=device)
-    z = torch.linspace(-40, 40, 100, device=device)
+    # offset = random.uniform(0, 40 / 50)
+    x = torch.linspace(-40, 40, 100, dtype=torch.float32, device=device, requires_grad=True)  # + offset
+    y = torch.linspace(-40, 0, 50, dtype=torch.float32, device=device, requires_grad=True)  # + offset
+    z = torch.linspace(-40, 40, 100, dtype=torch.float32, device=device, requires_grad=True)  # + offset
     X, Y, Z = torch.meshgrid(x, y, z)
 
-    '''
-    cpu_model = INR3D('cpu')
-    cpu_model.cpu()
-    cpu_model.load_state_dict(torch.load('3d-model-stable', map_location='cpu'))
-    
     points = torch.stack((X.flatten(), Y.flatten(), Z.flatten()), dim=-1)
-    # return model(points).view(100, 50, 100)
-
-    for [x, y, z] in points:
-        input_tensor = torch.tensor([[x, y, z]], dtype=torch.float32, requires_grad=True, device=device)
-        output = model(input_tensor)
-        # grad_outputs = torch.ones_like(output[0])
-        # return torch.autograd.grad(outputs=output, inputs=input_tensor, grad_outputs=grad_outputs,
-        #                           is_grads_batched=True)
-        output.backward()
-        gradient_x, gradient_y, gradient_z = input_tensor.grad[0]
-
-        gradient_image[
-            closest(torch.linspace(-30, 30, 100), x),
-            closest(torch.linspace(-30, 0, 50), y),
-            closest(torch.linspace(-30, 30, 100), z)
-        ] = math.sqrt((gradient_x ** 2) + (gradient_y ** 2) + (gradient_z ** 2))
-    # print([x, y, z])
-    '''
-
-    points = torch.stack((X.flatten(), Y.flatten(), Z.flatten()), dim=-1)
-    # return model(points).view(100, 50, 100)
-
-    print("start")
-    input_tensor = torch.tensor(points, dtype=torch.float32, requires_grad=True, device=device)
-    output = model(input_tensor)
-    grad_outputs = torch.autograd.grad(outputs=output, inputs=input_tensor, grad_outputs=torch.ones_like(output),
+    output = model(points)
+    grad_outputs = torch.autograd.grad(outputs=output, inputs=points, grad_outputs=torch.ones_like(output),
                                        is_grads_batched=False)[0]
-    # output.backward()
-    print("mid")
 
-    if grad_outputs.device != 'cpu':
-        grad_outputs.detach().cpu()
+    grad_outputs = grad_outputs.detach().cpu()
+    gradient = torch.tensor([math.sqrt((x ** 2) + (y ** 2) + (z ** 2)) for [x, y, z] in grad_outputs],
+                            dtype=torch.float32, device='cpu')
 
-    gradient_image = torch.tensor([math.sqrt((x ** 2) + (y ** 2) + (z ** 2)) for [x, y, z] in grad_outputs],
-                                  dtype=torch.float32, device='cpu')
-
-    gradient_image = gradient_image.to(device)
-    print("end")
-
-    return gradient_image  # torch.tensor(gradient_image, dtype=torch.float32, device=device)  # model(points).view(100, 50, 100)
-
-
-def sample_from_gradient_image(gradient_image, k):
-    points = []
-    x_distribution, _ = margins(gradient_image[:, 25, :])
-
-    for _ in range(k):
-        x = x_distribution.flatten()
-        x /= np.sum(x)
-        cdf = np.cumsum(x)
-
-        '''
-        fig, (ax1, ax2) = plt.subplots(1, 2)
-        fig.suptitle('Marginal X')
-
-        ax1.step(torch.linspace(-30, 30, 100), x, where='mid', label='CDF')
-        ax1.grid(True)
-        ax2.step(torch.linspace(-30, 30, 100), cdf, where='mid', label='CDF')
-        ax2.grid(True)
-        plt.show()
-        '''
-
-        probabilities_to_invert = np.random.uniform(0, 1, 1)
-        x = closest(torch.linspace(-40, 40, 100),
-                    [inverse_cdf(p, torch.linspace(-40, 40, 100), cdf) for p in probabilities_to_invert][0])
-
-        y_distribution, _ = margins(gradient_image[x, :, :])
-        y = y_distribution.flatten()
-        y /= np.sum(y)
-        cdf = np.cumsum(y)
-
-        '''
-        fig, (ax1, ax2) = plt.subplots(1, 2)
-        fig.suptitle('Marginal Y')
-
-        ax1.step(torch.linspace(-30, 0, 50), y, where='mid', label='CDF')
-        ax1.grid(True)
-        ax2.step(torch.linspace(-30, 0, 50), cdf, where='mid', label='CDF')
-        ax2.grid(True)
-        plt.show()
-        '''
-
-        probabilities_to_invert = np.random.uniform(0, 1, 1)
-        y = closest(torch.linspace(-40, 0, 50),
-                    [inverse_cdf(p, torch.linspace(-40, 0, 50), cdf) for p in probabilities_to_invert][0])
-
-        _, z_distribution = margins(gradient_image[:, y, :])
-
-        z = z_distribution.flatten()
-        z /= np.sum(z)
-        cdf = np.cumsum(z)
-
-        '''
-        fig, (ax1, ax2) = plt.subplots(1, 2)
-        fig.suptitle('Marginal Z')
-
-        ax1.step(torch.linspace(-30, 30, 100), z, where='mid', label='CDF')
-        ax1.grid(True)
-        ax2.step(torch.linspace(-30, 30, 100), cdf, where='mid', label='CDF')
-        ax2.grid(True)
-        plt.show()
-        '''
-
-        probabilities_to_invert = np.random.uniform(0, 1, 1)
-        z = closest(torch.linspace(-40, 40, 100),
-                    [inverse_cdf(p, torch.linspace(-40, 40, 100), cdf) for p in probabilities_to_invert][0])
-
-        # print([torch.linspace(-30, 30, 100)[x], torch.linspace(-30, 0, 50)[y], torch.linspace(-30, 30, 100)[z]])
-        points.append([torch.linspace(-40, 40, 100)[x].item(), torch.linspace(-40, 0, 50)[y].item(),
-                       torch.linspace(-40, 40, 100)[z].item()])
-
-        x_distribution, _ = margins(gradient_image[:, :, z])
-        # x_distribution, _ = margins(distribution)[:, :, z]
-
-    # point_cloud = pv.PolyData(points)
-    # point_cloud.plot(eye_dome_lighting=True)
-    '''
-
-    cdf = np.cumsum(x)
-
-    # Plot the CDF
-    plt.step(torch.linspace(-30, 30, 100), cdf, where='mid', label='CDF')
-    plt.xlabel('x')
-    plt.ylabel('CDF')
-    plt.title('Cumulative Distribution Function')
-    plt.legend()
-    plt.grid(True)
-    plt.show()
-    '''
-    return points
+    return gradient.to(device)
 
 
 def laser_ray_gradient_sampling(image, gradient_image, laser_points=300):
     points = []
-    degree = int(image.split('_')[1])
     side = image.split('_')[2]
 
     K = renders_matrices[image]['K']
@@ -596,40 +441,34 @@ def laser_ray_gradient_sampling(image, gradient_image, laser_points=300):
     a, b, c = laser_norm
     d = -(a * laser_center[0] + b * laser_center[1] + c * laser_center[2])
 
-    render = np.array(cv.imread(os.path.join(image_folder, image), cv.IMREAD_UNCHANGED)[:, :, 0:3])
+    render = renders_matrices[image]['render'][:, :, 0:3]
     red_channel = render[:, :, 2] * 255
     _, red_channel = cv.threshold(red_channel, 100, 255, cv.THRESH_BINARY)
 
     camera_position = np.squeeze(np.asarray(- np.matrix(R).T @ t))
-    point_cloud_e = []  # [laser_center, camera_position]
-    point_cloud_u = []  # [laser_center, camera_position]
+    point_cloud_e = []
+    point_cloud_u = []
 
-    for u in range(red_channel.shape[0]):
-        for v in range(red_channel.shape[1]):
-            if not red_channel[u][v]:
-                continue
+    for [u, v] in np.column_stack(np.where(red_channel > 0)):
+        laser_point_camera = np.array(
+            [v - (red_channel.shape[1] / 2), u - (red_channel.shape[0] / 2), K[0][0], 1])
 
-            laser_point_camera = np.array(
-                [v - (red_channel.shape[1] / 2), u - (red_channel.shape[0] / 2), K[0][0], 1])
-            laser_point_world = np.concatenate([
-                np.concatenate([R.T, np.array(- R.T @ t).reshape(3, 1)], axis=1),
-                np.array([[0, 0, 0, 1]])
-            ], axis=0) @ laser_point_camera
+        laser_point_world = np.concatenate([
+            np.concatenate([R.T, np.array(- R.T @ t).reshape(3, 1)], axis=1),
+            np.array([[0, 0, 0, 1]])
+        ], axis=0) @ laser_point_camera
 
-            laser_point_world = [laser_point_world[0] / laser_point_world[3],
-                                 laser_point_world[1] / laser_point_world[3],
-                                 laser_point_world[2] / laser_point_world[3]]
+        laser_point_world = [laser_point_world[0] / laser_point_world[3],
+                             laser_point_world[1] / laser_point_world[3],
+                             laser_point_world[2] / laser_point_world[3]]
 
-            points.append([np.squeeze(
-                np.asarray(find_plane_line_intersection([a, b, c, d], camera_position, np.array(laser_point_world)))
-            ) * 10, -1])
-            break
+        points.append([np.squeeze(
+            np.asarray(find_plane_line_intersection([a, b, c, d], camera_position, np.array(laser_point_world)))
+        ) * 10, -1])
 
-    # print(degree)
     sampled_points, grid_points = sample_point_from_plane_gradient([0, -20, 0], laser_norm, model, laser_points)
     sampled_points /= 10
     grid_points /= 10
-
     '''
     plt.figure()
     plt.imshow(gradient_image[:, :, 50])
@@ -637,14 +476,16 @@ def laser_ray_gradient_sampling(image, gradient_image, laser_points=300):
     
 
     render_copy = copy.deepcopy(render)
-    for point in grid_points:  # .flatten(start_dim=0, end_dim=1):
-        p = project_point(point.numpy().tolist(), R, t, K)
-        cv.drawMarker(render_copy, p, [255, 255, 0], cv.MARKER_DIAMOND, 2, 1)
+    for point in points:  # .flatten(start_dim=0, end_dim=1):
+        p = project_point((point[0] / 10).tolist(), R, t, K)
+        print(p)
+        cv.drawMarker(render_copy, p, [255, 255, 0], cv.MARKER_TILTED_CROSS, 2, 2)
     cv.imshow("test-1", render_copy)
     cv.waitKey(1)
-
     '''
-    if debug:
+
+    dbg = False
+    if dbg:
         for point in sampled_points:  # .flatten(start_dim=0, end_dim=1):
             p = project_point(point.numpy().tolist(), R, t, K)
             cv.drawMarker(render, p, [255, 255, 0], cv.MARKER_DIAMOND, 2, 1)
@@ -721,7 +562,6 @@ def laser_ray_gradient_sampling(image, gradient_image, laser_points=300):
 
 
 def train_one_epoch_gradient(epoch_index, tb_writer):
-    print("gradient image done")
     running_loss = 0.
     last_loss = 0.
 
@@ -757,79 +597,61 @@ torch.save(model.state_dict(), '3d-model')
 print("Uniform training completed, intermediate model saved")
 model.train(True)
 
-if GRADIENT_BASED_TRAINING_EPOCHS > 0:
-    test = compute_gradient_image_from_model().view(100, 50, 100)
-    if device.type != 'cpu':
-        test = test.cpu().detach().numpy()
+for iteration in range(GRADIENT_ITERATIONS):
+    print(f"iteration: {iteration}")
+    gradient_image = compute_gradient_image_from_model().view(100, 50, 100)
+    print("gradient image done")
+
+    gradient_image = gradient_image.to('cpu').detach().numpy()
 
     if debug:
-        plane = test[:, 25, :]
+        plane = gradient_image[:, 25, :]
         fig = plt.figure()
         plt.imshow(plane)
         plt.show(block=True)
 
-        plane = test[50, :, :]
+        plane = gradient_image[50, :, :]
         fig = plt.figure()
         plt.imshow(plane)
         plt.show(block=True)
 
-        plane = test[:, :, 50]
+        plane = gradient_image[:, :, 50]
         fig = plt.figure()
         plt.imshow(plane)
         plt.show(block=True)
 
-    gradient_based_dataset = CustomDataset(create_gradient_base_dataset(test, 1000, 500))
+    gradient_based_dataset = INRPointsDataset(create_gradient_base_dataset(gradient_image, 200000, 50))
 
-else:
-    test = None
+    for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
+        print('EPOCH - gradient based - {}:'.format(epoch_number + 1))
 
-for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
-    print('EPOCH - gradient based - {}:'.format(epoch_number + 1))
-    # if (epoch - UNIFORM_TRAINING_EPOCHS) == GRADIENT_BASED_TRAINING_EPOCHS / 2:
-    #    gradient_based_dataset = CustomDataset(create_gradient_base_dataset(test, 3000, 300))
+        model.train(True)
+        avg_loss = train_one_epoch_gradient(epoch_number, writer)
 
-    # print(test)
-    model.train(True)
-    avg_loss = train_one_epoch_gradient(epoch_number, writer)
+        model.eval()
+        with torch.no_grad():
+            print('LOSS train {} valid {}'.format(avg_loss, 'unknown'))
 
-    running_vloss = 0.0
+        writer.add_scalars('Training vs. Validation Loss',
+                           {'Training': avg_loss},
+                           epoch_number + 1)
+        writer.flush()
 
-    '''
-    model.eval()
-    with torch.no_grad():
-        for val_index in range(100):
-            val_x = np.random.uniform(0., 500., 128)
-            val_y = np.random.uniform(0., 500., 128)
+        '''
+        if avg_vloss < best_validation_loss:
+            best_validation_loss = avg_vloss
+            model_path = 'models/model_{}_{}'.format(timestamp, epoch_number)
+            torch.save(model.state_dict(), model_path)
+        '''
 
-            v_inputs = [[val_x[i], val_y[i]] for i in range(128)]
-            v_labels = torch.tensor([[realistic_oracle(p)] for p in v_inputs], dtype=torch.float32, requires_grad=True,
-                                    device=device)
+        epoch_number += 1
 
-            v_outputs = model(torch.tensor(v_inputs, dtype=torch.float32, requires_grad=True, device=device))
-            vloss = loss_fn(v_outputs, v_labels)
-            running_vloss += vloss
-
-    avg_vloss = running_vloss / (val_index + 1)
-    print('LOSS train {} valid {}'.format(avg_loss, avg_vloss))
-    '''
-    print('LOSS train {} valid {}'.format(avg_loss, 'unknown'))
-
-    # Log the running loss averaged per batch
-    # for both training and validation
-    writer.add_scalars('Training vs. Validation Loss',
-                       {'Training': avg_loss},
-                       epoch_number + 1)
-    writer.flush()
-
-    # Track best performance, and save the model's state
-    '''
-    if avg_vloss < best_validation_loss:
-        best_validation_loss = avg_vloss
-        model_path = 'models/model_{}_{}'.format(timestamp, epoch_number)
-        torch.save(model.state_dict(), model_path)
-    '''
-
-    epoch_number += 1
+    abs_error = abs_model_evaluation(model, mesh.points)
+    mae_error = mae_model_evaluation(model, mesh.points, mesh.active_normals)
+    rmse_error = rmse_model_evaluation(model, mesh.points, mesh.active_normals)
+    print(f"EVAL ERR: {abs_error} {mae_error[0]} {rmse_error[0]} {rmse_error[2]}")
+    with open("history-gradient.txt", "a+") as history:
+        history.write(f"{abs_error} {mae_error[0]} {rmse_error[0]} {rmse_error[2]}\n")
 
 print(f"done {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
 model.train(False)

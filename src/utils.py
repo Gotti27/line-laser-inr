@@ -1,14 +1,15 @@
-import math
 import random
 
 import cv2 as cv
+import math
 import numpy as np
+import pyvista as pv
 import torch
 from matplotlib import pyplot as plt
 from scipy import spatial
-from scipy.stats.contingency import margins
 from sklearn.neighbors import KDTree
 
+import gibbs
 from inr_model import INR3D
 
 
@@ -116,32 +117,109 @@ def knn_point_classification(external, internal, unknown, k=5):
 
 
 def pure_knn_point_classification(external, internal, unknown, k=5):
-    # in pure knn internal list should be empty
     ret_external = [] + external
     ret_internal = [] + internal
     all_points = [] + external + internal + unknown
-    kd_tree = spatial.KDTree(all_points)
-    _, neighbors = kd_tree.query(unknown, k=k)
-
     all_labels = [1 for _ in external] + [-1 for _ in internal] + [0 for _ in unknown]
+    kd_tree = KDTree(np.array(all_points))
+    distances, neighbors = kd_tree.query(unknown, k=k, return_distance=True)
+
     for i, u in enumerate(unknown):
         point_neighbors = neighbors[i]
         if k == 1:
             point_class = [all_labels[point_neighbors]]
+            distances_sum = distances[i]
         else:
             point_class = [all_labels[n] for n in point_neighbors]
+            distances_sum = sum(distances[i])
 
-        internal_score = len([p for p in point_class if p == -1])
-        external_score = len([p for p in point_class if p == 1])
-        unknown_score = len([p for p in point_class if p == 0])
+        if sum(distances[i]) == 0:
+            external_score = len(
+                [p for index, p in enumerate(point_class) if p == 1])
+            unknown_score = len(
+                [p for index, p in enumerate(point_class) if p == 0])
+            internal_score = len(
+                [p for index, p in enumerate(point_class) if p == -1])
+        else:
+            external_score = len(
+                [(1 - (distances[index] / distances_sum)) * p for index, p in enumerate(point_class) if p == 1])
+            unknown_score = len(
+                [(1 - (distances[index] / distances_sum)) * p for index, p in enumerate(point_class) if p == 0])
+            internal_score = len(
+                [(1 - (distances[index] / distances_sum)) * p for index, p in enumerate(point_class) if p == -1])
 
-        # FIXME: this condition has to be refactored
-        if unknown_score > external_score or internal_score > unknown_score:
+        if unknown_score > external_score:
+            ret_internal.append(u)
+        else:
+            ret_external.append(u)
+        '''
+        if external_score >= internal_score and external_score >= unknown_score >= internal_score:
+            ret_external.append(u)
+        else:
+            ret_internal.append(u)
+        '''
+
+        '''
+        if external_score > unknown_score or external_score > internal_score:
+            ret_external.append(u)
+        else:
+            ret_internal.append(u)
+        '''
+
+    return ret_external, ret_internal
+
+
+def project_point_onto_vector(P, A, v):
+    P = np.array(P)
+    A = np.array(A)
+    v = np.array(v)
+
+    P_translated = P - A
+    dot_product = np.dot(P_translated, v)
+    vector_magnitude_squared = np.dot(v, v)
+    projection_scalar = dot_product / vector_magnitude_squared
+    projection = projection_scalar * v
+    projected_point = projection + A
+
+    return projected_point
+
+
+def determine_side_of_vector(P, A, v):
+    projected_point = project_point_onto_vector(P, A, v)
+    AP_projected = projected_point - A
+    dot_product = np.dot(AP_projected, v)
+    if dot_product > 0:
+        return 1
+    elif dot_product < 0:
+        return -1
+    else:
+        return 0
+
+
+def normal_based_knn_point_classification(vertex, normals, unknown, k=5):
+    ret_external = []
+    ret_internal = []
+    kd_tree = spatial.KDTree(vertex)
+    _, neighbors = kd_tree.query(unknown, k=k)
+
+    for i, u in enumerate(unknown):
+        point_neighbors = neighbors[i]
+        if k == 1:
+            point_class = sum([[determine_side_of_vector(u, vertex[point_neighbors], normals[point_neighbors])]])
+        else:
+            point_class = sum([determine_side_of_vector(u, vertex[n], normals[n]) for n in point_neighbors])
+
+        if point_class <= 0:
             ret_internal.append(u)
         else:
             ret_external.append(u)
 
     return ret_external, ret_internal
+
+
+def is_point_inside_mesh(mesh, point):
+    inside = mesh.select_enclosed_points(pv.PolyData([point]), tolerance=0.0, inside_out=True)
+    return inside['SelectedPoints'][0] == 1
 
 
 def rotate_x(angle):
@@ -272,7 +350,14 @@ def sample_point_from_plane(laser_center, laser_norm):
     R, t = compute_laser_transformation(laser_center, laser_norm)
 
     x = random.uniform(-2, 2)
-    y = random.uniform(-4, 4)
+    y = random.uniform(-6, 6)
+    '''
+    '''
+    if random.choice([True, False]):
+        y = random.uniform(-6, -1)
+    else:
+        y = random.uniform(1, 6)
+
     z = 0
 
     point = np.array([x, y, z, 1])
@@ -285,7 +370,10 @@ def sample_point_from_plane(laser_center, laser_norm):
 
 
 def inverse_cdf(p, x, cdf):
-    return x[np.searchsorted(cdf, p)]
+    index = np.searchsorted(cdf, p)
+    if index == len(x):
+        index -= 1
+    return x[index]
 
 
 def closest(lst, k):
@@ -296,19 +384,16 @@ def autograd_proxy(output, input_tensor):
     grad_outputs = torch.autograd.grad(outputs=output, inputs=input_tensor, grad_outputs=torch.ones_like(output),
                                        is_grads_batched=False)[0]
 
-    if grad_outputs.device != 'cpu':
-        grad_outputs.detach().cpu()
-
     gradient_image = torch.tensor([math.sqrt((x ** 2) + (y ** 2) + (z ** 2)) for [x, y, z] in grad_outputs],
-                                  dtype=torch.float32, device='cpu')
-    return gradient_image
+                                  dtype=torch.float32)
+    return gradient_image.cpu()
 
 
 def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100):
     points = []
     R, t = compute_laser_transformation(laser_center, laser_norm)
-    x = torch.linspace(-20, 20, 50)
-    y = torch.linspace(-40, 40, 100)
+    x = torch.linspace(-20, 20, 50, device='cpu')
+    y = torch.linspace(-60, 60, 100, device='cpu')
     z = 0
 
     grid_points = []
@@ -327,9 +412,9 @@ def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100):
 
     grid_points_clone = grid_points.clone()
     # grid_points_clone /= 10
-    input_tensor = torch.tensor(grid_points, dtype=torch.float32, requires_grad=True)
-    output = model(input_tensor)
-    gradient_image = autograd_proxy(output, input_tensor)
+    grid_points = grid_points.requires_grad_(True)
+    output = model(grid_points)
+    gradient_image = autograd_proxy(output, grid_points)
 
     output = output.view(50, 100)
     output = output.detach().cpu().numpy()
@@ -347,6 +432,7 @@ def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100):
         # plt.show(block=True)
         plt.show(block=False)
 
+    '''
     x_distr, _ = margins(gradient_image.view(50, 100).numpy())
 
     for _ in range(k):
@@ -356,18 +442,9 @@ def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100):
         probabilities_to_invert = np.random.uniform(0, 1, 1)
         # print(np.searchsorted(cdf, 0))
         # print(np.searchsorted(cdf, 1))
+        # FIXME: this might be broken
         x = closest(torch.linspace(-20, 20, 50),
                     [inverse_cdf(p, torch.linspace(-20, 20, 50), cdf) for p in probabilities_to_invert][0])
-
-        '''
-        plt.figure()
-        plt.plot(x)
-        plt.show(block=False)
-
-        plt.figure()
-        plt.plot(cdf)
-        plt.show(block=False)
-        '''
 
         y_distr = margins(gradient_image.view(50, 100)[x, :].numpy())[0]
 
@@ -378,21 +455,145 @@ def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100):
         y = closest(torch.linspace(-40, 40, 100),
                     [inverse_cdf(p, torch.linspace(-40, 40, 100), cdf) for p in probabilities_to_invert][0])
 
-        '''
-        plt.figure()
-        plt.plot(y)
-        plt.show(block=False)
-
-        plt.figure()
-        plt.plot(cdf)
-        plt.show(block=False)
-        '''
-
         x_distr = margins(gradient_image.view(50, 100)[:, y].numpy())[0]
 
         points.append(grid_points_clone.view(50, 100, 3)[x, y].cpu().numpy())
+    '''
 
-    points = np.array(points)
-    points = torch.from_numpy(points)
-    return torch.tensor(points, dtype=torch.float32, device='cpu'), grid_points_clone
+    points = gibbs.gibbs_sampling_2d(gradient_image.view(50, 100).detach().cpu().numpy(), k, [0, 0, 0],
+                                     grid_points_clone)
+    points = [p for p in points if
+              ((-40 <= p[0] <= -10 or 10 <= p[0] <= 40) and -40 <= p[2] <= 40) or
+              ((-40 <= p[2] <= -10 or 10 <= p[2] <= 40) and -40 <= p[0] <= 40)]
 
+    return torch.from_numpy(np.array(points)), grid_points_clone
+
+
+def abs_model_evaluation(model: INR3D, points: np.ndarray):
+    with torch.no_grad():
+        densities = model(torch.tensor(points, dtype=torch.float32))
+        outputs = abs(densities.detach().cpu().numpy())
+    return np.sum(outputs) / len(points)
+
+
+def find_optimal_point_parallel(model, vertexes, normals, epsilon=1e-5, max_iter=100, dbg=False):
+    a = np.full(len(vertexes), -0.2, dtype=np.float32)
+    b = np.full(len(vertexes), 0.2, dtype=np.float32)
+    num_points = len(vertexes)
+
+    optimal_points = [[vertexes[i], 1] for i in range(len(vertexes))]
+
+    for _ in range(max_iter):
+        m = (a + b) / 2.0
+
+        points_low = vertexes + a[:, np.newaxis] * normals
+        points_mid = vertexes + m[:, np.newaxis] * normals
+        points_high = vertexes + b[:, np.newaxis] * normals
+
+        points = np.vstack((points_low, points_mid, points_high))
+        values = model(torch.from_numpy(points).type(torch.float32).to(
+            "cuda:0" if torch.cuda.is_available() else "cpu"
+        )).detach().cpu()
+
+        val_a = values[:num_points]
+        val_m = values[num_points:2 * num_points]
+        val_b = values[2 * num_points:]
+
+        mask = np.abs(val_m) < epsilon
+        for i, flag in enumerate(mask):
+            if flag and optimal_points[i][1] == 1:
+                optimal_points[i] = [points_mid[i], 0]
+
+        sign_low = np.sign(val_a).flatten()
+        sign_mid = np.sign(val_m).flatten()
+        sign_high = np.sign(val_b).flatten()
+
+        for i in range(len(a)):
+            if sign_low[i] != sign_mid[i]:
+                b[i] = m[i]
+            elif sign_high[i] != sign_mid[i]:
+                a[i] = m[i]
+            else:
+                a[i] *= 1.2
+                b[i] *= 1.2
+
+        if dbg:
+            plotter = pv.Plotter()
+            plotter.add_points(pv.PolyData(points_low), color='red')
+            plotter.add_points(pv.PolyData(points_high), color='blue')
+            plotter.add_points(pv.PolyData(points_mid), color='green')
+            plotter.show()
+
+    return optimal_points
+
+
+def mae_model_evaluation(model: INR3D, points: np.ndarray, normals: np.ndarray):
+    abs_values = []
+    optimal_points = find_optimal_point_parallel(model, points,
+                                                 normals,
+                                                 epsilon=0.0001,
+                                                 max_iter=30,
+                                                 dbg=False)
+    print("converged on mesh: ", sum([1 for o in optimal_points if o[1] == 0]), len(points))
+    errors = []
+    for i in range(len(points)):
+        point = points[i]
+        if optimal_points[i][1] == 0:
+            optimal_point = optimal_points[i][0]
+            # print(math.dist(point, optimal_point))
+            error = math.dist(point, optimal_point)
+            # if error > 5:
+            #    error = 5
+            abs_values.append(error)
+            errors.append(error)
+        else:
+            errors.append(np.nan)
+            # squares.append(1 ** 2)
+
+    return sum(abs_values) / len(points), sum([1 for o in optimal_points if o[1] == 0]) / len(points)
+
+
+def rmse_model_evaluation(model: INR3D, points: np.ndarray, normals: np.ndarray, dbg=False):
+    squares = []
+    optimal_points = find_optimal_point_parallel(model, points,
+                                                 normals,
+                                                 epsilon=0.0001,
+                                                 max_iter=30,
+                                                 dbg=False)
+    print("converged on mesh: ", sum([1 for o in optimal_points if o[1] == 0]), len(points))
+    errors = []
+    for i in range(len(points)):
+        point = points[i]
+        if optimal_points[i][1] == 0:
+            optimal_point = optimal_points[i][0]
+            error = math.dist(point, optimal_point)
+            # if error > 5:
+            #    error = 5
+            squares.append(error ** 2)
+            errors.append(error)
+        else:
+            errors.append(np.nan)
+    '''
+    p1 = pv.Plotter()
+    p1.add_points(pv.PolyData(optimal_points), color='red')
+    p1.add_points(pv.PolyData(points), color='blue')
+    # p1.add_points(pv.PolyData(old_vertices))
+    # p1.add_arrows(points, normals, color='black')
+    p1.add_axes()
+    p1.show_grid()
+    p1.show()
+    '''
+
+    if dbg:
+        point_cloud = pv.PolyData(points)
+        point_cloud['errors'] = [min(e, 2.) for e in errors]
+        cmap = plt.cm.plasma
+        cmap.set_bad(color='green')
+        plotter = pv.Plotter()
+        plotter.add_mesh(point_cloud, scalars='errors', cmap=cmap, nan_color='green', point_size=10)
+        plotter.add_scalar_bar(title='Error Value', n_labels=5)
+
+        plotter.show()
+
+    return math.sqrt(sum(squares) / len(points)), np.array(errors), \
+        sum([1 for o in optimal_points if o[1] == 0]) / len(points)
