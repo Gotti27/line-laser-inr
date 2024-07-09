@@ -1,14 +1,15 @@
-import math
 import random
 
 import cv2 as cv
+import math
 import numpy as np
+import pyvista as pv
 import torch
 from matplotlib import pyplot as plt
 from scipy import spatial
-from scipy.stats.contingency import margins
 from sklearn.neighbors import KDTree
 
+import gibbs
 from inr_model import INR3D
 
 
@@ -168,11 +169,57 @@ def pure_knn_point_classification(external, internal, unknown, k=5):
     return ret_external, ret_internal
 
 
+def project_point_onto_vector(P, A, v):
+    P = np.array(P)
+    A = np.array(A)
+    v = np.array(v)
+
+    P_translated = P - A
+    dot_product = np.dot(P_translated, v)
+    vector_magnitude_squared = np.dot(v, v)
+    projection_scalar = dot_product / vector_magnitude_squared
+    projection = projection_scalar * v
+    projected_point = projection + A
+
+    return projected_point
+
+
+def determine_side_of_vector(P, A, v):
+    projected_point = project_point_onto_vector(P, A, v)
+    AP_projected = projected_point - A
+    dot_product = np.dot(AP_projected, v)
+    if dot_product > 0:
+        return 1
+    elif dot_product < 0:
+        return -1
+    else:
+        return 0
+
+
+def normal_based_knn_point_classification(vertex, normals, unknown, k=5):
+    ret_external = []
+    ret_internal = []
+    kd_tree = spatial.KDTree(vertex)
+    _, neighbors = kd_tree.query(unknown, k=k)
+
+    for i, u in enumerate(unknown):
+        point_neighbors = neighbors[i]
+        if k == 1:
+            point_class = sum([[determine_side_of_vector(u, vertex[point_neighbors], normals[point_neighbors])]])
+        else:
+            point_class = sum([determine_side_of_vector(u, vertex[n], normals[n]) for n in point_neighbors])
+
+        if point_class <= 0:
             ret_internal.append(u)
         else:
             ret_external.append(u)
 
     return ret_external, ret_internal
+
+
+def is_point_inside_mesh(mesh, point):
+    inside = mesh.select_enclosed_points(pv.PolyData([point]), tolerance=0.0, inside_out=True)
+    return inside['SelectedPoints'][0] == 1
 
 
 def rotate_x(angle):
