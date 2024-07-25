@@ -1,7 +1,7 @@
+import math
 import random
 
 import cv2 as cv
-import math
 import numpy as np
 import pyvista as pv
 import torch
@@ -15,6 +15,10 @@ from inr_model import INR3D
 
 def gear(angle):
     return 100 + (10 * math.sin(20 * math.radians(angle)))
+
+
+def gear_custom(angle, a, b, c):
+    return a + (b * math.sin(c * math.radians(angle)))
 
 
 def oracle(point):
@@ -351,12 +355,6 @@ def sample_point_from_plane(laser_center, laser_norm):
 
     x = random.uniform(-2, 2)
     y = random.uniform(-6, 6)
-    '''
-    '''
-    if random.choice([True, False]):
-        y = random.uniform(-6, -1)
-    else:
-        y = random.uniform(1, 6)
 
     z = 0
 
@@ -462,9 +460,6 @@ def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100):
 
     points = gibbs.gibbs_sampling_2d(gradient_image.view(50, 100).detach().cpu().numpy(), k, [0, 0, 0],
                                      grid_points_clone)
-    points = [p for p in points if
-              ((-40 <= p[0] <= -10 or 10 <= p[0] <= 40) and -40 <= p[2] <= 40) or
-              ((-40 <= p[2] <= -10 or 10 <= p[2] <= 40) and -40 <= p[0] <= 40)]
 
     return torch.from_numpy(np.array(points)), grid_points_clone
 
