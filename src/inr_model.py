@@ -43,11 +43,11 @@ class INR3D(nn.Module):
         return torch.cat((torch.cos(vp), torch.sin(vp)), dim=-1)
 
     def forward(self, x):
-        x = self.gaussian_encoding(x)  # self.encoding(x)
+        x = self.gaussian_encoding(x)
         x = nn.functional.relu(self.fc1(x))
         x = nn.functional.relu(self.fc2(x))
         x = nn.functional.relu(self.fc3(x))
-        x = self.out(x)  # nn.functional.tanh(self.out(x))
+        x = nn.functional.tanh(self.out(x))
 
         return x
 
