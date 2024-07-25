@@ -15,7 +15,7 @@ UNIFORM_TRAINING_EPOCHS = 20
 GRADIENT_ITERATIONS = 0
 GRADIENT_BASED_TRAINING_EPOCHS = 20
 
-target = 'teapot'
+target = 'Dragon'
 
 np.bool = np.bool_
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
@@ -34,16 +34,22 @@ debug = args.debug
 if debug:
     print("---DEBUG MODE ACTIVATED---")
 
-if debug:
-    UNIFORM_TRAINING_EPOCHS = 0
-
 print(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
+with open(f"history-{target}-uniform.txt", "a+") as history:
+    history.write(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}\n")
 
 mesh = pv.read(f'scenes/meshes/{target}.ply')
 mesh = mesh.rotate_z(180)
 mesh = mesh.rotate_x(90)
 mesh = mesh.scale(10)
 mesh.compute_normals(inplace=True)
+if debug:
+    p1 = pv.Plotter()
+    p1.add_mesh(mesh, color='tan')
+    p1.add_arrows(mesh.points, mesh.active_normals, color='black')
+    p1.add_axes()
+    p1.show_grid()
+    p1.show()
 
 image_folder = f'renders/{target}'
 images = [img for img in os.listdir(image_folder) if img.endswith(".exr")]
@@ -57,7 +63,7 @@ model = model.to(device)
 loss_fn = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-load = True
+load = False
 if debug and load:
     model.load_state_dict(torch.load('3d-model', map_location=device))
 
@@ -66,7 +72,8 @@ renders_matrices = load_renders(images, target)
 
 def silhouette_sampling(point):
     x, y, z = point
-    for image in list(filter(lambda img: 'right' in img, images)):
+    # for image in list(filter(lambda img: 'right' in img, images)):
+    for image in images:
         K = renders_matrices[image]['K']
         R = renders_matrices[image]['R']
         t = renders_matrices[image]['t']
@@ -76,7 +83,7 @@ def silhouette_sampling(point):
         depth = render_depth[:, :, 3]
 
         is_outside = p[0] < 0 or p[0] >= 256 or p[1] < 0 or p[1] >= 256
-        if is_outside or depth[p[1], p[0]] == 0:
+        if not is_outside and depth[p[1], p[0]] == 0:
             return 1
     return -1
 
@@ -115,9 +122,21 @@ def laser_ray_sampling(image, laser_points):
                              laser_point_world[1] / laser_point_world[3],
                              laser_point_world[2] / laser_point_world[3]]
 
-        points.append([np.squeeze(
+        world_point = np.squeeze(
             np.asarray(find_plane_line_intersection([a, b, c, d], camera_position, np.array(laser_point_world)))
-        ), -1])
+        )
+
+        points.append([world_point, -1])
+
+    '''
+    if debug:
+        render = np.array(render)
+        for p in points:
+            cv.drawMarker(render, project_point(p[0].tolist(), R, t, K), [0, 255, 0], cv.MARKER_TILTED_CROSS, 1, 1)
+
+        cv.imshow('foobar', render)
+        cv.waitKey(0)
+    '''
 
     for _ in range(laser_points):
         x, y, z = sample_point_from_plane([0, -2, 0], laser_norm)
@@ -159,6 +178,7 @@ def laser_ray_sampling(image, laser_points):
 
         '''
         if debug:
+            render = np.array(render)
             cv.drawMarker(render, p_far_point, [255, 255, 0], cv.MARKER_DIAMOND, 2, 1)
             cv.drawMarker(render, p, [0, 0, 255], cv.MARKER_CROSS, 2, 2)
             cv.imshow('red', red_channel)
@@ -205,13 +225,18 @@ def create_uniform_dataset(silhouette_points=3000, laser_points=300):
             unknown.append(point)
 
     sampling_list = images.copy()
-    for _ in range(360 * 2):
+    for _ in range(len(sampling_list)):
         image = random.sample(sampling_list, 1)[0]
+        sampling_list.remove(image)
         for point, label in laser_ray_sampling(image, laser_points):
             if label == 1:
                 external.append(point)
             elif label == 0:
                 unknown.append(point)
+                if silhouette_sampling(point) == 1:
+                    external.append(point)
+                else:
+                    unknown.append(point)
             else:
                 internal.append(point)
 
@@ -235,23 +260,37 @@ def create_uniform_dataset(silhouette_points=3000, laser_points=300):
         point_cloud.plot(eye_dome_lighting=True, show_axes=True, show_bounds=True)
 
     print(math.floor(math.sqrt(len(external) + len(internal) + len(unknown))))
-    external, internal = pure_knn_point_classification([[p_p * 10 for p_p in p] for p in external],
-                                                       [[p_p * 10 for p_p in p] for p in internal],
-                                                       [[p_p * 10 for p_p in p] for p in unknown],
-                                                       30)
+
+    external, internal = pure_knn_point_classification(
+        [[p_p * 10 for p_p in p] for p in external],
+        [],
+        [[p_p * 10 for p_p in p] for p in unknown],
+        5
+    )
 
     print("Uniform dataset created")
 
     if debug:
-        point_cloud = pv.PolyData(internal)
-        point_cloud.plot(eye_dome_lighting=True)
-        point_cloud = pv.PolyData(external)
-        point_cloud.plot(eye_dome_lighting=True)
+        p1 = pv.Plotter()
+        p1.add_mesh(mesh, color='tan')
+        p1.add_points(pv.PolyData(internal))
+        p1.add_axes()
+        p1.show_grid()
+        p1.show()
+
+        p1 = pv.Plotter()
+        p1.add_mesh(mesh, color='tan')
+        p1.add_points(pv.PolyData(external))
+        p1.add_axes()
+        p1.show_grid()
+        p1.show()
+
+    # evaluate_point_classification(mesh, external, internal)
 
     inputs = np.concatenate((inputs, external), axis=0)
     inputs = np.concatenate((inputs, internal), axis=0)
 
-    labels = torch.tensor([[1] for _ in external] + [[-1] for _ in internal], dtype=torch.float32,
+    labels = torch.tensor([[1] for _ in external] + [[0] for _ in internal], dtype=torch.float32,
                           requires_grad=True, device=device)
 
     print(f"Total number of points in the dataset {len(inputs)}")
@@ -297,7 +336,10 @@ def create_gradient_base_dataset(gradient_image_d, silhouette_points=3000, laser
             if label == 1:
                 external.append(point)
             elif label == 0:
-                unknown.append(point)
+                if silhouette_sampling([p_p / 10 for p_p in point]) == 1:
+                    external.append(point)
+                else:
+                    unknown.append(point)
             else:
                 internal.append(point)
         # print(f"{image} done")
@@ -309,7 +351,7 @@ def create_gradient_base_dataset(gradient_image_d, silhouette_points=3000, laser
         point_cloud = pv.PolyData(external)
         point_cloud.plot(eye_dome_lighting=True)
 
-    external, internal = pure_knn_point_classification(external, internal, unknown, 30)
+    external, internal = pure_knn_point_classification(external, [], unknown, 5)
 
     if debug:
         point_cloud = pv.PolyData(internal)
@@ -357,7 +399,7 @@ def train_one_epoch_uniformly(epoch_index, tb_writer):
 
 for iteration in range(UNIFORM_ITERATIONS):
     print(f"iteration: {iteration}")
-    uniform_dataset = INRPointsDataset(create_uniform_dataset(200000, 50))
+    uniform_dataset = INRPointsDataset(create_uniform_dataset(100000, 100))
 
     '''
     
@@ -405,7 +447,7 @@ for iteration in range(UNIFORM_ITERATIONS):
     mae_error = mae_model_evaluation(model, mesh.points, mesh.active_normals)
     rmse_error = rmse_model_evaluation(model, mesh.points, mesh.active_normals)
     print(f"EVAL ERR: {abs_error} {mae_error[0]} {rmse_error[0]} {rmse_error[2]}")
-    with open("history-uniform.txt", "a+") as history:
+    with open(f"history-{target}-uniform.txt", "a+") as history:
         history.write(f"{abs_error} {mae_error[0]} {rmse_error[0]} {rmse_error[2]}\n")
 
 
@@ -425,7 +467,7 @@ def compute_gradient_image_from_model():
     gradient = torch.tensor([math.sqrt((x ** 2) + (y ** 2) + (z ** 2)) for [x, y, z] in grad_outputs],
                             dtype=torch.float32, device='cpu')
 
-    return gradient.to(device)
+    return gradient.to(device), output
 
 
 def laser_ray_gradient_sampling(image, gradient_image, laser_points=300):
@@ -593,19 +635,27 @@ def train_one_epoch_gradient(epoch_index, tb_writer):
 
 
 model.train(False)
-torch.save(model.state_dict(), '3d-model')
+torch.save(model.state_dict(), f'3d-model-{target}')
 print("Uniform training completed, intermediate model saved")
 model.train(True)
 
 for iteration in range(GRADIENT_ITERATIONS):
     print(f"iteration: {iteration}")
-    gradient_image = compute_gradient_image_from_model().view(100, 50, 100)
+    gradient_image, model_output_grid = compute_gradient_image_from_model()
+    gradient_image = gradient_image.view(100, 50, 100)
+    model_output_grid = model_output_grid.view(100, 50, 100)
     print("gradient image done")
 
     gradient_image = gradient_image.to('cpu').detach().numpy()
+    model_output_grid = model_output_grid.to('cpu').detach().numpy()
 
     if debug:
         plane = gradient_image[:, 25, :]
+        fig = plt.figure()
+        plt.imshow(plane)
+        plt.show()
+
+        plane = model_output_grid[:, 25, :]
         fig = plt.figure()
         plt.imshow(plane)
         plt.show(block=True)
@@ -620,7 +670,7 @@ for iteration in range(GRADIENT_ITERATIONS):
         plt.imshow(plane)
         plt.show(block=True)
 
-    gradient_based_dataset = INRPointsDataset(create_gradient_base_dataset(gradient_image, 200000, 50))
+    gradient_based_dataset = INRPointsDataset(create_gradient_base_dataset(gradient_image, 100000, 100))
 
     for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
         print('EPOCH - gradient based - {}:'.format(epoch_number + 1))
@@ -650,12 +700,15 @@ for iteration in range(GRADIENT_ITERATIONS):
     mae_error = mae_model_evaluation(model, mesh.points, mesh.active_normals)
     rmse_error = rmse_model_evaluation(model, mesh.points, mesh.active_normals)
     print(f"EVAL ERR: {abs_error} {mae_error[0]} {rmse_error[0]} {rmse_error[2]}")
-    with open("history-gradient.txt", "a+") as history:
+    with open(f"history-{target}-gradient.txt", "a+") as history:
         history.write(f"{abs_error} {mae_error[0]} {rmse_error[0]} {rmse_error[2]}\n")
 
 print(f"done {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
+with open(f"history-{target}-uniform.txt", "a+") as history:
+    history.write(f"done {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}\n")
+
 model.train(False)
-torch.save(model.state_dict(), '3d-model')
+torch.save(model.state_dict(), f'3d-model-{target}')
 
 if debug:
     cv.waitKey(0)

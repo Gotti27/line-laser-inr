@@ -137,38 +137,17 @@ def pure_knn_point_classification(external, internal, unknown, k=5):
             point_class = [all_labels[n] for n in point_neighbors]
             distances_sum = sum(distances[i])
 
-        if sum(distances[i]) == 0:
-            external_score = len(
-                [p for index, p in enumerate(point_class) if p == 1])
-            unknown_score = len(
-                [p for index, p in enumerate(point_class) if p == 0])
-            internal_score = len(
-                [p for index, p in enumerate(point_class) if p == -1])
-        else:
-            external_score = len(
-                [(1 - (distances[index] / distances_sum)) * p for index, p in enumerate(point_class) if p == 1])
-            unknown_score = len(
-                [(1 - (distances[index] / distances_sum)) * p for index, p in enumerate(point_class) if p == 0])
-            internal_score = len(
-                [(1 - (distances[index] / distances_sum)) * p for index, p in enumerate(point_class) if p == -1])
+        external_score = len(
+            [p for index, p in enumerate(point_class) if p == 1])
+        unknown_score = len(
+            [p for index, p in enumerate(point_class) if p == 0])
+        internal_score = len(
+            [p for index, p in enumerate(point_class) if p == -1])
 
         if unknown_score > external_score:
             ret_internal.append(u)
         else:
             ret_external.append(u)
-        '''
-        if external_score >= internal_score and external_score >= unknown_score >= internal_score:
-            ret_external.append(u)
-        else:
-            ret_internal.append(u)
-        '''
-
-        '''
-        if external_score > unknown_score or external_score > internal_score:
-            ret_external.append(u)
-        else:
-            ret_internal.append(u)
-        '''
 
     return ret_external, ret_internal
 

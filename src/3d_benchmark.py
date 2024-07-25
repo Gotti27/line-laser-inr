@@ -13,7 +13,7 @@ from inr_model import INR3D
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-target = 'teapot'
+target = 'Dragon'
 torch.manual_seed(41)
 model = INR3D()
 
@@ -40,17 +40,17 @@ plt.ylabel("Root Mean Square Error")
 plt.show()
 '''
 
-x = torch.linspace(-40, 40, 100)
-y = torch.linspace(-40, 0, 50)
-z = torch.linspace(-40, 40, 100)
+x = torch.linspace(-40, 40, 200)
+y = torch.linspace(-40, 0, 100)
+z = torch.linspace(-40, 40, 200)
 X, Y, Z = torch.meshgrid(x, y, z)
 
 points = torch.stack((X.flatten(), Y.flatten(), Z.flatten()), dim=-1)
 
 with torch.no_grad():
-    densities = np.array(model(points).reshape(100, 50, 100))
+    densities = np.array(model(points).reshape(200, 100, 200))
 
-plane = densities[:, :, 50]
+plane = densities[:, :, 100]
 fig = plt.figure()
 plt.imshow(plane)
 plt.show(block=True)
