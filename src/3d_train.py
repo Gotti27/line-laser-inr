@@ -245,13 +245,13 @@ def create_uniform_dataset(silhouette_points=3000, laser_points=300):
             if label == 1:
                 external.append(point)
             elif label == 0:
-                unknown.append(point)
                 if silhouette_sampling(point) == 1:
                     external.append(point)
                 else:
                     unknown.append(point)
             else:
-                internal.append(point)
+                pass
+                # internal.append(point)
 
     '''
     if debug:
@@ -267,10 +267,26 @@ def create_uniform_dataset(silhouette_points=3000, laser_points=300):
     '''
     print("Uniform raw dataset created - executing KNN")
     if debug:
-        point_cloud = pv.PolyData([[p_p * 10 for p_p in p] for p in unknown])
+        p1 = pv.Plotter()
+        p1.add_mesh(mesh, color='tan')
+        p1.add_points(pv.PolyData([[p_p * 10 for p_p in p] for p in internal]))
+        p1.add_axes()
+        p1.show_grid()
+        p1.show()
+
+        p1 = pv.Plotter()
+        p1.add_mesh(mesh, color='tan')
+        p1.add_points(pv.PolyData([[p_p * 10 for p_p in p] for p in external]))
+        p1.add_axes()
+        p1.show_grid()
+        p1.show()
+
+        '''
+        point_cloud = pv.PolyData([[p_p * 10 for p_p in p[0]] for p in unknown_l])
         point_cloud.plot(eye_dome_lighting=True, show_axes=True, show_bounds=True)
-        point_cloud = pv.PolyData([[p_p * 10 for p_p in p] for p in external])
+        point_cloud = pv.PolyData([[p_p * 10 for p_p in p[0]] for p in external_l])
         point_cloud.plot(eye_dome_lighting=True, show_axes=True, show_bounds=True)
+        '''
 
     print(math.floor(math.sqrt(len(external) + len(internal) + len(unknown))))
 
@@ -354,7 +370,8 @@ def create_gradient_base_dataset(gradient_image_d, silhouette_points=3000, laser
                 else:
                     unknown.append(point)
             else:
-                internal.append(point)
+                pass
+                # internal.append(point)
         # print(f"{image} done")
 
     print("images done", time.time() - start)
