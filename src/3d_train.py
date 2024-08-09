@@ -9,13 +9,20 @@ from torch.utils.tensorboard import SummaryWriter
 from dataset import INRPointsDataset, load_renders
 from utils import *
 
-UNIFORM_ITERATIONS = 10
+target = 'bunny'
+mode = 'gradient'  # 'gradient'
+EPSILON = 0
+
+if mode != 'uniform' and mode != 'gradient':
+    raise RuntimeError("mode not valid")
+
+UNIFORM_ITERATIONS = 10 if mode == 'uniform' else 0
 UNIFORM_TRAINING_EPOCHS = 20
 
-GRADIENT_ITERATIONS = 0
+GRADIENT_ITERATIONS = 10 if mode == 'gradient' else 0
 GRADIENT_BASED_TRAINING_EPOCHS = 20
+# np.seterr(divide='ignore', invalid='ignore')
 
-target = 'Dragon'
 
 np.bool = np.bool_
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
@@ -35,8 +42,14 @@ if debug:
     print("---DEBUG MODE ACTIVATED---")
 
 print(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
-with open(f"history-{target}-uniform.txt", "a+") as history:
-    history.write(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}\n")
+
+if UNIFORM_ITERATIONS > 0:
+    with open(f"history-{target}-uniform.txt", "a+") as history:
+        history.write(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}\n")
+
+if GRADIENT_ITERATIONS > 0:
+    with open(f"history-{target}-gradient.txt", "a+") as history:
+        history.write(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}\n")
 
 mesh = pv.read(f'scenes/meshes/{target}.ply')
 mesh = mesh.rotate_z(180)
@@ -63,9 +76,9 @@ model = model.to(device)
 loss_fn = torch.nn.BCELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-load = False
+load = True
 if debug and load:
-    model.load_state_dict(torch.load('3d-model', map_location=device))
+    model.load_state_dict(torch.load(f'3d-model-{target}-grad', map_location=device))
 
 renders_matrices = load_renders(images, target)
 
@@ -453,10 +466,11 @@ for iteration in range(UNIFORM_ITERATIONS):
 
 
 def compute_gradient_image_from_model():
-    # offset = random.uniform(0, 40 / 50)
-    x = torch.linspace(-40, 40, 100, dtype=torch.float32, device=device, requires_grad=True)  # + offset
-    y = torch.linspace(-40, 0, 50, dtype=torch.float32, device=device, requires_grad=True)  # + offset
-    z = torch.linspace(-40, 40, 100, dtype=torch.float32, device=device, requires_grad=True)  # + offset
+    # offset = random.uniform(0, 80 / 100)
+    x = torch.linspace(-40, 40, 100, dtype=torch.float32, device=device, requires_grad=True)
+    y = torch.linspace(-40, 0, 50, dtype=torch.float32, device=device, requires_grad=True)
+    z = torch.linspace(-40, 40, 100, dtype=torch.float32, device=device, requires_grad=True)
+
     X, Y, Z = torch.meshgrid(x, y, z)
 
     points = torch.stack((X.flatten(), Y.flatten(), Z.flatten()), dim=-1)
@@ -706,8 +720,14 @@ for iteration in range(GRADIENT_ITERATIONS):
         history.write(f"{abs_error} {mae_error[0]} {rmse_error[0]} {rmse_error[2]}\n")
 
 print(f"done {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
-with open(f"history-{target}-uniform.txt", "a+") as history:
-    history.write(f"done {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}\n")
+
+if UNIFORM_ITERATIONS > 0:
+    with open(f"history-{target}-uniform.txt", "a+") as history:
+        history.write(f"done {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}\n")
+
+if GRADIENT_ITERATIONS > 0:
+    with open(f"history-{target}-gradient.txt", "a+") as history:
+        history.write(f"done {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}\n")
 
 model.train(False)
 torch.save(model.state_dict(), f'3d-model-{target}')
