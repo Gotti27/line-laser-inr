@@ -703,6 +703,8 @@ for iteration in range(GRADIENT_ITERATIONS):
         plt.imshow(plane)
         plt.show(block=True)
 
+    gradient_image += EPSILON
+
     gradient_based_dataset = INRPointsDataset(create_gradient_base_dataset(gradient_image, 100000, 100))
 
     for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
