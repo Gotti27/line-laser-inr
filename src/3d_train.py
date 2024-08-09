@@ -60,7 +60,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.set_default_device(device)
 model = INR3D(device=device)
 model = model.to(device)
-loss_fn = torch.nn.MSELoss()
+loss_fn = torch.nn.BCELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
 load = False
@@ -362,7 +362,7 @@ def create_gradient_base_dataset(gradient_image_d, silhouette_points=3000, laser
     inputs = np.concatenate((inputs, external), axis=0)
     inputs = np.concatenate((inputs, internal), axis=0)
 
-    labels = torch.tensor([[1] for _ in external] + [[-1] for _ in internal], dtype=torch.float32,
+    labels = torch.tensor([[1] for _ in external] + [[0] for _ in internal], dtype=torch.float32,
                           requires_grad=True, device=device)
 
     dataset = [
@@ -381,6 +381,7 @@ def train_one_epoch_uniformly(epoch_index, tb_writer):
 
         optimizer.zero_grad()
         outputs = model(inputs)
+        outputs = (outputs + 1) / 2
         loss = loss_fn(outputs, labels)
         loss.backward()
         optimizer.step()
@@ -616,6 +617,7 @@ def train_one_epoch_gradient(epoch_index, tb_writer):
 
         optimizer.zero_grad()
         outputs = model(inputs)
+        outputs = (outputs + 1) / 2
         loss = loss_fn(outputs, labels)
         loss.backward()
         optimizer.step()
