@@ -60,7 +60,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.set_default_device(device)
 model = INR3D(device=device)
 model = model.to(device)
-loss_fn = torch.nn.BCEWithLogitsLoss()
+loss_fn = torch.nn.BCELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
 load = False
