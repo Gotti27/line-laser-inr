@@ -381,8 +381,8 @@ def train_one_epoch_uniformly(epoch_index, tb_writer):
 
         optimizer.zero_grad()
         outputs = model(inputs)
+        outputs = (outputs + 1) / 2
         loss = loss_fn(outputs, labels)
-        loss = (loss + 1) / 2
         loss.backward()
         optimizer.step()
 
@@ -617,8 +617,8 @@ def train_one_epoch_gradient(epoch_index, tb_writer):
 
         optimizer.zero_grad()
         outputs = model(inputs)
+        outputs = (outputs + 1) / 2
         loss = loss_fn(outputs, labels)
-        loss = (loss + 1) / 2
         loss.backward()
         optimizer.step()
 
