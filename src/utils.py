@@ -361,12 +361,12 @@ def autograd_proxy(output, input_tensor):
     grad_outputs = torch.autograd.grad(outputs=output, inputs=input_tensor, grad_outputs=torch.ones_like(output),
                                        is_grads_batched=False)[0]
 
-    gradient_image = torch.tensor([math.sqrt((x ** 2) + (y ** 2) + (z ** 2)) for [x, y, z] in grad_outputs],
-                                  dtype=torch.float32)
-    return gradient_image.cpu()
+    grad_outputs = grad_outputs.detach().cpu()
+    return torch.tensor([math.sqrt((x ** 2) + (y ** 2) + (z ** 2)) for [x, y, z] in grad_outputs], dtype=torch.float32,
+                        device='cpu')
 
 
-def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100):
+def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100, device='cpu'):
     points = []
     R, t = compute_laser_transformation(laser_center, laser_norm)
     x = torch.linspace(-20, 20, 50, device='cpu')
@@ -393,10 +393,10 @@ def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100):
     output = model(grid_points)
     gradient_image = autograd_proxy(output, grid_points)
 
-    output = output.view(50, 100)
-    output = output.detach().cpu().numpy()
     dbg = False
     if dbg:
+        output = output.view(50, 100)
+        output = output.detach().cpu().numpy()
         plane = output
         fig = plt.figure()
         plt.imshow(plane)
@@ -437,10 +437,10 @@ def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100):
         points.append(grid_points_clone.view(50, 100, 3)[x, y].cpu().numpy())
     '''
 
-    points = gibbs.gibbs_sampling_2d(gradient_image.view(50, 100).detach().cpu().numpy(), k, [0, 0, 0],
+    points = gibbs.gibbs_sampling_2d(gradient_image.view(50, 100).numpy(), k, [0, 0, 0],
                                      grid_points_clone)
 
-    return torch.from_numpy(np.array(points)), grid_points_clone
+    return torch.from_numpy(points), grid_points_clone
 
 
 def abs_model_evaluation(model: INR3D, points: np.ndarray):
@@ -565,7 +565,7 @@ def rmse_model_evaluation(model: INR3D, points: np.ndarray, normals: np.ndarray,
         cmap.set_bad(color='green')
         plotter = pv.Plotter()
         plotter.add_mesh(point_cloud, scalars='errors', cmap=cmap, nan_color='green', point_size=10)
-        plotter.add_scalar_bar(title='Error Value', n_labels=5)
+        # plotter.add_scalar_bar(title='Error Value', n_labels=5)
 
         plotter.show()
 
