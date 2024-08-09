@@ -1,4 +1,5 @@
 import copy
+import os
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +10,29 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from skimage import measure
 
 import utils
+from dataset import load_renders
 from inr_model import INR3D
+
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
+
+
+def silhouette_sampling(point):
+    a, b, c = point
+    # for image in list(filter(lambda img: 'right' in img, images)):
+    for image in images:
+        K = renders_matrices[image]['K']
+        R = renders_matrices[image]['R']
+        t = renders_matrices[image]['t']
+        render_depth = renders_matrices[image]['render']
+
+        p = utils.project_point([a, b, c], R, t, K)
+        depth = render_depth[:, :, 3]
+
+        is_outside = p[0] < 0 or p[0] >= 256 or p[1] < 0 or p[1] >= 256
+        if not is_outside and depth[p[1], p[0]] == 0:
+            return 1
+    return -1
+
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -17,9 +40,14 @@ target = 'Dragon'
 torch.manual_seed(41)
 model = INR3D()
 
+image_folder = f'renders/{target}'
+images = [img for img in os.listdir(image_folder) if img.endswith(".exr")]
+images.sort(key=lambda name: int(name.split('_')[1]))
+renders_matrices = load_renders(images, target)
+
 loss_fn = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-model.load_state_dict(torch.load('3d-model', map_location=device))
+model.load_state_dict(torch.load('3d-model-Dragon-grad', map_location=device))
 
 '''
 with open('history-uniform.txt', 'r') as f:
@@ -50,6 +78,20 @@ points = torch.stack((X.flatten(), Y.flatten(), Z.flatten()), dim=-1)
 with torch.no_grad():
     densities = np.array(model(points).reshape(200, 100, 200))
 
+print(points.shape)
+grid = points.reshape(200, 100, 200, 3)
+print(grid.shape)
+'''
+densities = [densities[i] if (silhouette_sampling(grid[i] / 10)) == -1 else 1 for i in range(len(grid))]
+for i in range(200):
+    for j in range(100):
+        for k in range(200):
+            if densities[i, j, k] < 0 and (silhouette_sampling(grid[i, j, k] / 10)) == 1:
+                densities[i, j, k] = 1
+    print(f"row: {i} done")
+'''
+
+densities = densities.reshape(200, 100, 200)
 plane = densities[:, :, 100]
 fig = plt.figure()
 plt.imshow(plane)
@@ -134,6 +176,8 @@ shell.plot(eye_dome_lighting=True, show_axes=True)
 fig = plt.figure(figsize=(10, 10))
 ax = fig.add_subplot(111, projection='3d')
 
+vertices @= utils.rotate_y(-180)
+vertices @= utils.rotate_x(-90)
 # mesh = Poly3DCollection(old_vertices[faces])
 mesh = Poly3DCollection(np.array([[vertices[f] for f in face] for face in faces]))
 mesh.set_edgecolor('k')
