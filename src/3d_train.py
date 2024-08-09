@@ -11,6 +11,7 @@ from utils import *
 
 target = 'bunny'
 mode = 'gradient'  # 'gradient'
+NUMBER_IMAGES = 0
 EPSILON = 0
 
 if mode != 'uniform' and mode != 'gradient':
@@ -66,6 +67,7 @@ if debug:
 
 image_folder = f'renders/{target}'
 images = [img for img in os.listdir(image_folder) if img.endswith(".exr")]
+images = random.sample(images, NUMBER_IMAGES if NUMBER_IMAGES > 0 else len(images))
 images.sort(key=lambda name: int(name.split('_')[1]))
 
 torch.manual_seed(41)

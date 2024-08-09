@@ -1,6 +1,7 @@
 import argparse
 import math
 import os
+import random
 from datetime import datetime
 
 import cv2 as cv
@@ -13,6 +14,7 @@ from src.dataset import load_renders
 from src.utils import find_plane_line_intersection, project_point, rotate_y, rotate_x
 
 target = 'Armadillo'
+NUMBER_IMAGES = 0
 
 np.bool = np.bool_
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
@@ -29,6 +31,7 @@ print(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
 
 image_folder = f'renders/{target}'
 images = [img for img in os.listdir(image_folder) if img.endswith(".exr")]
+images = random.sample(images, NUMBER_IMAGES if NUMBER_IMAGES > 0 else len(images))
 images.sort(key=lambda name: int(name.split('_')[1]))
 
 point_cloud_file = open(f"pointcloud-{target}.xyz", "w")  # a+
