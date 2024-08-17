@@ -9,10 +9,21 @@ from torch.utils.tensorboard import SummaryWriter
 from dataset import INRPointsDataset, load_renders
 from utils import *
 
-target = 'bunny'
-mode = 'gradient'  # 'gradient'
-NUMBER_IMAGES = 0
-EPSILON = 0
+parser = argparse.ArgumentParser()
+parser.add_argument("-t", "--target", dest="target", help="Target object", default=None)
+parser.add_argument("-i", "--images", dest="images_number", help="Number of input images", type=int, default=0)
+parser.add_argument("-m", "--mode", dest="mode", help="mode: uniform or gradient", choices=['uniform', 'gradient'],
+                    default='uniform')
+parser.add_argument("-e", "--epsilon", dest="epsilon", help="epsilon to smooth gradient distribution", type=float,
+                    default=0)
+parser.add_argument("-d", "--debug", dest="debug", help="Enable debug mode", action="store_true", default=False)
+args = parser.parse_args()
+
+target = args.target if args.target is not None else 'Dragon'
+mode = args.mode
+NUMBER_IMAGES = args.images_number
+EPSILON = args.epsilon
+
 
 if mode != 'uniform' and mode != 'gradient':
     raise RuntimeError("mode not valid")
@@ -34,10 +45,6 @@ writer = SummaryWriter('runs/model_trainer_{}'.format(timestamp))
 epoch_number = 0
 best_validation_loss = 1_000_000.
 
-parser = argparse.ArgumentParser()
-parser.add_argument("-d", "--debug", dest="debug", help="Enable debug mode", action="store_true", default=False)
-args = parser.parse_args()
-
 debug = args.debug
 if debug:
     print("---DEBUG MODE ACTIVATED---")
@@ -46,11 +53,12 @@ print(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
 
 if UNIFORM_ITERATIONS > 0:
     with open(f"history-{target}-uniform.txt", "a+") as history:
-        history.write(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}\n")
+        history.write(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')} IMAGES: {NUMBER_IMAGES}\n")
 
 if GRADIENT_ITERATIONS > 0:
     with open(f"history-{target}-gradient.txt", "a+") as history:
-        history.write(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}\n")
+        history.write(
+            f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')} IMAGES: {NUMBER_IMAGES} EPS: {EPSILON}\n")
 
 mesh = pv.read(f'scenes/meshes/{target}.ply')
 mesh = mesh.rotate_z(180)
@@ -67,7 +75,7 @@ if debug:
 
 image_folder = f'renders/{target}'
 images = [img for img in os.listdir(image_folder) if img.endswith(".exr")]
-images = random.sample(images, NUMBER_IMAGES if NUMBER_IMAGES > 0 else len(images))
+images = random.sample(images, NUMBER_IMAGES if 0 < NUMBER_IMAGES < len(images) else len(images))
 images.sort(key=lambda name: int(name.split('_')[1]))
 
 torch.manual_seed(41)
@@ -271,13 +279,6 @@ def create_uniform_dataset(silhouette_points=3000, laser_points=300):
     if debug:
         p1 = pv.Plotter()
         p1.add_mesh(mesh, color='tan')
-        p1.add_points(pv.PolyData([[p_p * 10 for p_p in p] for p in internal]))
-        p1.add_axes()
-        p1.show_grid()
-        p1.show()
-
-        p1 = pv.Plotter()
-        p1.add_mesh(mesh, color='tan')
         p1.add_points(pv.PolyData([[p_p * 10 for p_p in p] for p in external]))
         p1.add_axes()
         p1.show_grid()
@@ -290,7 +291,7 @@ def create_uniform_dataset(silhouette_points=3000, laser_points=300):
         point_cloud.plot(eye_dome_lighting=True, show_axes=True, show_bounds=True)
         '''
 
-    print(math.floor(math.sqrt(len(external) + len(internal) + len(unknown))))
+    # print(math.floor(math.sqrt(len(external) + len(internal) + len(unknown))))
 
     external, internal = pure_knn_point_classification(
         [[p_p * 10 for p_p in p] for p in external],
@@ -358,11 +359,10 @@ def create_gradient_base_dataset(gradient_image_d, silhouette_points=3000, laser
     start = time.time()
 
     sampling_list = images.copy()
-    for _ in range(360 * 2):
+    for _ in range(len(sampling_list)):
         image = random.sample(sampling_list, 1)[0]
-        # FIXME: image = random.sample(sampling_list, 1)[0]
+        sampling_list.remove(image)
         # image = sampling_list[91 + 30]  # 90
-        # print(image)
         for point, label in laser_ray_gradient_sampling(image, gradient_image_d, laser_points):
             if label == 1:
                 external.append(point)
