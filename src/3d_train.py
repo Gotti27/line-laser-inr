@@ -3,6 +3,7 @@ import os
 import time
 from datetime import datetime
 
+import multiprocess
 import torch.utils.data
 from torch.utils.tensorboard import SummaryWriter
 
@@ -24,6 +25,8 @@ mode = args.mode
 NUMBER_IMAGES = args.images_number
 EPSILON = args.epsilon
 
+CORES_FRACTION = 0.8
+num_workers = int(os.cpu_count() * CORES_FRACTION)
 
 if mode != 'uniform' and mode != 'gradient':
     raise RuntimeError("mode not valid")
@@ -239,9 +242,12 @@ def create_uniform_dataset(silhouette_points=3000, laser_points=300):
 
     inputs = np.array([]).reshape(0, 3)
 
-    for point in [[random.uniform(-4, 4), random.uniform(-4, 0), random.uniform(-4, 4)] for _ in
-                  range(silhouette_points)]:
-        label = silhouette_sampling(point)
+    pool = multiprocess.Pool(num_workers)
+    labels = pool.map(lambda p: [p, silhouette_sampling(p)],
+                      [[random.uniform(-4, 4), random.uniform(-4, 0), random.uniform(-4, 4)] for _ in
+                       range(silhouette_points)])
+
+    for point, label in labels:
         if label == 1:
             external.append(point)
         else:
@@ -251,17 +257,22 @@ def create_uniform_dataset(silhouette_points=3000, laser_points=300):
     for _ in range(len(sampling_list)):
         image = random.sample(sampling_list, 1)[0]
         sampling_list.remove(image)
+        to_check = []
         for point, label in laser_ray_sampling(image, laser_points):
             if label == 1:
                 external.append(point)
             elif label == 0:
-                if silhouette_sampling(point) == 1:
-                    external.append(point)
-                else:
-                    unknown.append(point)
+                to_check.append(point)
             else:
                 pass
                 # internal.append(point)
+
+        labels = pool.map(lambda p: [p, silhouette_sampling(p)], to_check)
+        for point, label in labels:
+            if label == 1:
+                external.append(point)
+            else:
+                unknown.append(point)
 
     '''
     if debug:
@@ -349,8 +360,12 @@ def create_gradient_base_dataset(gradient_image_d, silhouette_points=3000, laser
     # for point in sample_from_gradient_image(gradient_image, silhouette_points):
     start = time.time()
     print("started silhouette sampling")
-    for point in gibbs.gibbs_sampling_3d(gradient_image_d, silhouette_points, [0, 0, 0], grid):
-        label = silhouette_sampling([p_p / 10 for p_p in point])
+
+    pool = multiprocess.Pool(num_workers)
+    labels = pool.map(lambda p: [p, silhouette_sampling([p_p / 10 for p_p in p])],
+                      gibbs.gibbs_sampling_3d(gradient_image_d, silhouette_points, [0, 0, 0], grid))
+
+    for point, label in labels:
         if label == 1:
             external.append(point)
         else:
@@ -362,18 +377,23 @@ def create_gradient_base_dataset(gradient_image_d, silhouette_points=3000, laser
     for _ in range(len(sampling_list)):
         image = random.sample(sampling_list, 1)[0]
         sampling_list.remove(image)
-        # image = sampling_list[91 + 30]  # 90
+        to_check = []
         for point, label in laser_ray_gradient_sampling(image, gradient_image_d, laser_points):
             if label == 1:
                 external.append(point)
             elif label == 0:
-                if silhouette_sampling([p_p / 10 for p_p in point]) == 1:
-                    external.append(point)
-                else:
-                    unknown.append(point)
+                to_check.append(point)
             else:
                 pass
                 # internal.append(point)
+
+        labels = pool.map(lambda p: [p, silhouette_sampling([p_p / 10 for p_p in p])], to_check)
+        for point, label in labels:
+            if label == 1:
+                external.append(point)
+            else:
+                unknown.append(point)
+
         # print(f"{image} done")
 
     print("images done", time.time() - start)
