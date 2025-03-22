@@ -1,15 +1,15 @@
 import argparse
-import random
 from datetime import datetime
 
-import torch
+import torch.nn
 from torch.utils.tensorboard import SummaryWriter
 
+from dataset import INRPointsDataset
 from inr_model import INR2D
 from utils import *
 
-UNIFORM_TRAINING_EPOCHS = 15
-GRADIENT_BASED_TRAINING_EPOCHS = 5
+UNIFORM_TRAINING_EPOCHS = 30
+GRADIENT_BASED_TRAINING_EPOCHS = 0
 INTRA_RAY_DEGREES = 1
 UNIFORM_BATCH_NUMBER = 50
 GRADIENT_BASED_BATCH_NUMBER = 10
@@ -39,72 +39,92 @@ loss_fn = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
 
+def create_uniform_dataset(num_points=100000):
+    if debug:
+        laser_rays = np.zeros((500, 500, 1), np.uint8)
+        laser_points = np.zeros((500, 500, 1), np.uint8)
+        laser_points.fill(255)
+        laser_points_after_knn = np.zeros((500, 500, 1), np.uint8)
+        laser_points_after_knn.fill(255)
+    else:
+        laser_rays = None
+        laser_points = None
+        laser_points_after_knn = None
+
+    external = []
+    internal = []
+    unknown = []
+
+    inputs = np.array([]).reshape(0, 2)
+    for _ in range(400):
+        start_point = [250, 250]  # [random.randint(0, 500), random.randint(0, 500)]
+        angle = random.uniform(0., 360.)
+
+        if debug:
+            simulate_laser_ray(start_point, angle, 1, laser_rays)
+        e, inner, u = generate_laser_points(start_point, angle)
+        external.extend(random.sample(e, 40 if len(e) > 40 else len(e)))
+        internal.extend(random.sample(inner, 10 if len(inner) > 10 else len(inner)))
+        unknown.extend(random.sample(u, 40 if len(u) > 40 else len(u)))
+
+    external, internal = knn_point_classification(external, internal, unknown, 5)
+
+    if debug:
+        for e in list(filter(lambda p: 0 < p[0] < 500 and 0 < p[1] < 500, external)):
+            laser_points_after_knn[e[1], e[0]] = 150
+            # laser_points[e[1], e[0]] = 0
+
+        for inne in list(filter(lambda p: 0 < p[0] < 500 and 0 < p[1] < 500, internal)):
+            laser_points[inne[1], inne[0]] = 0
+            laser_points_after_knn[inne[1], inne[0]] = 0
+
+        cv.imshow("laser negative points", laser_points)
+        cv.imwrite('/Users/mario/lasers.png', laser_points)
+        cv.imshow("laser negative points after knn", laser_points_after_knn)
+        cv.imwrite('/Users/mario/internals.png', laser_points_after_knn)
+        cv.imshow("laser rays", laser_rays)
+        cv.imwrite('/Users/mario/rays.png', laser_rays)
+        cv.waitKey(0)
+
+    ##
+    grid_size = 500
+    inputs = torch.randint(0, grid_size, (num_points, 2))
+    inputs = inputs.cpu()
+
+    labels = torch.tensor([[realistic_oracle(i)] for i in inputs],
+                          dtype=torch.float32, requires_grad=True,
+                          device=device)
+
+    dataset = [
+        [inputs[i].type(torch.float32).requires_grad_(True).to(device), labels[i]]
+        for i
+        in range(len(inputs))]
+
+    return INRPointsDataset(dataset)
+
+
 def train_one_epoch(epoch_index, tb_writer):
     running_loss = 0.
     last_loss = 0.
 
-    for batch_index in range(UNIFORM_BATCH_NUMBER):
-        if debug:
-            laser_rays = np.zeros((500, 500, 1), np.uint8)
-            laser_points = np.zeros((500, 500, 1), np.uint8)
-            laser_points.fill(255)
-            laser_points_after_knn = np.zeros((500, 500, 1), np.uint8)
-            laser_points_after_knn.fill(255)
-        else:
-            laser_rays = None
-            laser_points = None
-            laser_points_after_knn = None
+    dataset = create_uniform_dataset()
+    training_loader = torch.utils.data.DataLoader(dataset, batch_size=64, shuffle=True,
+                                                  generator=torch.Generator(device=device), num_workers=0)
 
-        external = []
-        internal = []
-        unknown = []
-
-        inputs = np.array([]).reshape(0, 2)
-        for _ in range(400):
-            start_point = [250, 250]  # [random.randint(0, 500), random.randint(0, 500)]
-            angle = random.uniform(0., 360.)
-
-            if debug:
-                simulate_laser_ray(start_point, angle, 1, laser_rays)
-            e, inner, u = generate_laser_points(start_point, angle)
-            external.extend(random.sample(e, 40 if len(e) > 40 else len(e)))
-            internal.extend(random.sample(inner, 10 if len(inner) > 10 else len(inner)))
-            unknown.extend(random.sample(u, 40 if len(u) > 40 else len(u)))
-
-        external, internal = knn_point_classification(external, internal, unknown, 5)
-
-        if debug:
-            for e in list(filter(lambda p: 0 < p[0] < 500 and 0 < p[1] < 500, external)):
-                laser_points_after_knn[e[1], e[0]] = 150
-                # laser_points[e[1], e[0]] = 0
-
-            for inne in list(filter(lambda p: 0 < p[0] < 500 and 0 < p[1] < 500, internal)):
-                laser_points[inne[1], inne[0]] = 0
-                laser_points_after_knn[inne[1], inne[0]] = 0
-
-            cv.imshow("laser negative points", laser_points)
-            cv.imshow("laser negative points after knn", laser_points_after_knn)
-            cv.imshow("laser rays", laser_rays)
-            cv.waitKey(1)
-
-        inputs = np.concatenate((inputs, external), axis=0)
-        inputs = np.concatenate((inputs, internal), axis=0)
-
-        labels = torch.tensor([[1] for _ in external] + [[-1] for _ in internal], dtype=torch.float32,
-                              requires_grad=True, device=device)
+    for batch_index, data in enumerate(training_loader):
+        inputs, labels = data
 
         optimizer.zero_grad()
-        outputs = model(torch.tensor(np.array(inputs), dtype=torch.float32, requires_grad=True, device=device))
+        outputs = model(inputs)
+        # outputs = (outputs + 1) / 2
         loss = loss_fn(outputs, labels)
         loss.backward()
         optimizer.step()
 
         running_loss += loss.item()
 
-        print(f"batch {batch_index} done, loss: {loss.item()}", end='\r')
-
-        if batch_index == UNIFORM_BATCH_NUMBER - 1:
-            last_loss = running_loss / UNIFORM_BATCH_NUMBER  # loss per batch
+        if batch_index == len(training_loader) - 1:
+            last_loss = running_loss / len(training_loader)
             print('  batch {} loss: {}'.format(batch_index + 1, last_loss))
             tb_x = epoch_index * 100 + batch_index + 1
             tb_writer.add_scalar('Loss/train', last_loss, tb_x)
@@ -304,7 +324,7 @@ for epoch in range(GRADIENT_BASED_TRAINING_EPOCHS):
 
 print(f"done {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
 model.train(False)
-torch.save(model.state_dict(), 'model')
+torch.save(model.state_dict(), 'model-2d')
 
 if debug:
     cv.waitKey(0)

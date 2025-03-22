@@ -7,25 +7,26 @@ import cv2 as cv
 import mitsuba as mi
 import numpy as np
 
-from src.utils import rotate_y, rotate_x, project_point
+from utils import rotate_x, project_point, rotate_z
 
 print(mi.variants())
-mi.set_variant('llvm_ad_rgb')
+mi.set_variant('scalar_rgb')
+# mi.set_variant('llvm_ad_rgb')
 
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
 # Execution flags
 testing = False  # Just fooling the static analyzer :)
-do_all_renders = True
+do_all_renders = False
 laser_degree_delta = 30
-target = 'teapot'
+target = 'Dragon-small'
 target_mesh = target + '.ply'
 
 # Calculating Camera Intrinsic parameters
 
 vertical_fov = 60
-img_width = 256
-img_height = 256
+img_width = 1024
+img_height = 1024
 
 fov_radians = math.radians(vertical_fov)
 fx = fy = img_width / (2 * math.tan(fov_radians / 2))
@@ -43,10 +44,17 @@ print(K)
 
 ###
 
+import pyvista as pv
+
+foo = []
+bar = []
+bel = []
+foo.append([0, 0, 0])
+
 if testing:
     testing_angle = 45
-    scene = mi.load_file("scenes/gear_right.xml", angle=testing_angle, target=target_mesh,
-                         laser_angle_delta=laser_degree_delta)
+    scene = mi.load_file("scenes/gear_left.xml", angle=testing_angle, target=target_mesh,
+                         laser_angle_delta=laser_degree_delta, res=256)
 
     image = mi.render(scene, spp=256)
     print(image)
@@ -55,35 +63,66 @@ if testing:
     # test = np.array(image[:, :, 3])  # cv.imread("my_first_render_0.exr", cv.IMREAD_UNCHANGED)
     render = cv.imread("my_first_render_0.exr", cv.IMREAD_UNCHANGED)
     print(render.shape)
+    '''
+    render = render * 255
+    render[render > 255] = 255
+    render = np.uint8(render)
+
+    for i in range(render.shape[0]):
+        for j in range(render.shape[1]):
+            print(render[i][j][3])
+            if render[i][j][3] == 0:
+                render[i][j][0] = 255
+                render[i][j][1] = 255
+                render[i][j][2] = 255
+
+    cv.imwrite("render-test.png", render[:, :, 0:3])
+    '''
+
     # depth_map = render[:, :, 3]
     # normalized_depth_map = cv.normalize(depth_map, None, 0, 255, cv.NORM_MINMAX, dtype=cv.CV_16U)
     # cv.imshow("Depth Map", normalized_depth_map)
 
     # t = np.array([0, 0, 7.])
-    t = np.array([0, 2, 7.])
+    t = np.array([0, 0, 1.2])
     R = np.eye(3, 3)
-    R @= rotate_x(20)
-    R @= rotate_y(testing_angle)
-    # R @= rotate_x(90)
+    # R @= np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]])
+    ##### latest
+    R @= rotate_x(30)
+    ####
+    R @= rotate_x(-90)
+    # R @= rotate_y(testing_angle)
+    R @= rotate_z(testing_angle)
+    # R @= rotate_x(20)
+    R @= np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
 
     camera_position = - np.matrix(R).T @ t
     print("pose: ", camera_position)
     print("Projection Matrix: ", K @ np.concatenate([R, np.matrix(t).T], axis=1))
 
     print(np.append(camera_position, [[1]], axis=1))
-    laser_center = np.squeeze(np.asarray(camera_position)) @ rotate_y(laser_degree_delta)
-    laser_norm = np.array([1, 0, 0]) @ rotate_x(20) @ rotate_y(testing_angle) @ rotate_y(laser_degree_delta)
+    laser_center = np.squeeze(np.asarray(camera_position)) @ rotate_z(-laser_degree_delta)
+    laser_norm = np.array([0.5, 0, 0]) @ rotate_z(-testing_angle) @ rotate_z(-laser_degree_delta)
     print("laser center: ", laser_center)
     print("laser norm: ", laser_norm)
 
-    points = [project_point(p, R, t, K) for p in [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 1], [0, 0, 0],
-                                                  (laser_norm + np.array([0, 0, 0.])).tolist()]]
+    bel.append(np.squeeze(np.asarray(camera_position)))
+    foo.append(np.squeeze(np.asarray(laser_norm)).tolist())
+    foo.append([0, 0, 0])
+    foo.append(np.squeeze(np.asarray(np.array([0, 0, 0.5]))).tolist())
+    foo.append([0, 0, 0])
+    foo.append(np.squeeze(np.asarray(laser_center)))
+    bar.append(np.squeeze(np.asarray(laser_center)))
+
+    points = [project_point(p, R, t, K) for p in
+              [[0, 0, 0], [0.5, 0, 0], [0, 0.5, 0], [0, 0, 0.5], [1, 1, 1], [0, 0, 0],
+               (laser_norm + np.array([0, 0, 0.])).tolist()]]
 
     origin = points[0]
     top_x = points[1]
     top_y = points[2]
     top_z = points[3]
-    testing_point = points[4]
+    # testing_point = points[4]
     translated_origin = points[5]
     norm_test = points[6]
 
@@ -93,27 +132,58 @@ if testing:
             [0, 255, 0], 1)
     cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_z[0])), int(round(top_z[1]))],
             [255, 0, 0], 1)
-    cv.line(render, [int(round(origin[0])), int(round(origin[1]))],
-            [int(round(testing_point[0])), int(round(testing_point[1]))],
-            [255, 0, 255], 1)
+    # cv.line(render, [int(round(origin[0])), int(round(origin[1]))],
+    #        [int(round(testing_point[0])), int(round(testing_point[1]))],
+    #        [255, 0, 255], 1)
 
     cv.line(render, [int(round(translated_origin[0])), int(round(translated_origin[1]))],
             [int(round(norm_test[0])), int(round(norm_test[1]))],
             [255, 255, 0], 1)
 
+    cv.drawMarker(render, project_point([-0.5, 0.5, 0.5], R, t, K), [0, 255, 0])
+    cv.drawMarker(render, project_point([0.5, 0.5, 0.5], R, t, K), [0, 255, 0])
+    cv.drawMarker(render, project_point([0.5, 0.5, -0.5], R, t, K), [0, 255, 0])
+    cv.drawMarker(render, project_point([-0.5, 0.5, -0.5], R, t, K), [0, 255, 0])
+
     cv.imshow("Render", render[:, :, 0:3])
     cv.waitKey(0)
     cv.destroyAllWindows()
+
+    print(np.array(foo))
+    plotter = pv.Plotter()
+    plotter.add_lines(
+        np.array(foo),
+        width=10,
+        color='blue'
+    )
+    plotter.add_points(
+        pv.PolyData(foo),
+        point_size=10,
+    )
+    plotter.add_points(
+        pv.PolyData(bel),
+        point_size=10,
+        color='green'
+    )
+    plotter.add_points(
+        pv.PolyData(bar),
+        point_size=10,
+        color='red'
+    )
+    plotter.show_axes()
+    plotter.show_grid()
+    plotter.show()
+
     exit(0)
 
 
 def do_renders(side):
-    for i in range(360):
+    for i in range(0, 360):
         rendered_image = mi.render(
-            mi.load_file(f"scenes/gear_{side}.xml", angle=i, target=target_mesh, laser_angle_delta=laser_degree_delta),
-            spp=256)
-        cv.imshow("rendering progress", np.array(rendered_image))
-        cv.waitKey(1)
+            mi.load_file(f"scenes/gear_{side}.xml", angle=i, target=target_mesh, laser_angle_delta=laser_degree_delta,
+                         res=1024), spp=256)
+        # cv.imshow("rendering progress", np.array(rendered_image))
+        # cv.waitKey(1)
         mi.util.write_bitmap(f"renders/{target}/data_{i}_{side}_render.exr", rendered_image)
 
         print(f"{round(i / 360 * 100)}%")
@@ -136,6 +206,7 @@ height, width, layers = frame.shape
 right_images.sort(key=lambda name: int(name.split('_')[1]))
 
 for degree, image in enumerate(right_images):
+    # degree += 135
     render = image  # , position = image
 
     render = cv.imread(os.path.join(image_folder, render), cv.IMREAD_UNCHANGED)
@@ -143,18 +214,22 @@ for degree, image in enumerate(right_images):
 
     _, red_render = cv.threshold(render[:, :, 2] * 255, 100, 255, cv.THRESH_BINARY)
 
-    t = np.array([0, 2, 7.])  # 1
+    # t = np.array([0, 0, 7.])
+    t = np.array([0, 0, 1.2])
     R = np.eye(3, 3)
-    R @= rotate_x(20)
-    R @= rotate_y(degree)
+    # R @= np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]])
+    R @= rotate_x(-90)
+    R @= rotate_z(degree)
+    # R @= rotate_x(20)
+    R @= np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
 
     camera_position = - np.matrix(R).T @ t
     print("pose: ", camera_position)
     print("Projection Matrix: ", K @ np.concatenate([R, np.matrix(t).T], axis=1))
 
     print(np.append(camera_position, [[1]], axis=1))
-    laser_center = np.squeeze(np.asarray(camera_position)) @ rotate_y(laser_degree_delta)
-    laser_norm = np.array([1, 0, 0]) @ rotate_x(20) @ rotate_y(degree) @ rotate_y(laser_degree_delta)
+    laser_center = np.squeeze(np.asarray(camera_position)) @ rotate_z(-laser_degree_delta)
+    laser_norm = np.array([0.5, 0, 0]) @ rotate_z(-degree) @ rotate_z(-laser_degree_delta)
     print("laser center: ", laser_center)
     print("laser norm: ", laser_norm)
 
@@ -166,7 +241,8 @@ for degree, image in enumerate(right_images):
         pickle.dump(laser_norm, data_output_file)
 
     points = [project_point(p, R, t, K) for p in
-              [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 1], (laser_norm + np.array([0, 0, 0.])).tolist()]]
+              [[0, 0, 0], [0.5, 0, 0], [0, 0.5, 0], [0, 0, 0.5], [0.5, 0.5, 0.5],
+               (laser_norm + np.array([0, 0, 0.])).tolist()]]
 
     origin = points[0]
     top_x = points[1]
@@ -206,6 +282,7 @@ height, width, layers = frame.shape
 left_images.sort(key=lambda name: int(name.split('_')[1]))
 
 for degree, image in enumerate(left_images):
+    # degree += 135
     render = image  # , position = image
 
     render = cv.imread(os.path.join(image_folder, render), cv.IMREAD_UNCHANGED)
@@ -213,18 +290,27 @@ for degree, image in enumerate(left_images):
 
     _, red_render = cv.threshold(render[:, :, 2] * 255, 100, 255, cv.THRESH_BINARY)
 
-    t = np.array([0, 0, 7.])  # 1
+    # t = np.array([0, 0, 7.])
+    t = np.array([0, 0, 1.2])
     R = np.eye(3, 3)
-    R @= rotate_x(0)
-    R @= rotate_y(degree)
+    # R @= np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]])
+
+    ##### latest
+    R @= rotate_x(30)
+    ####
+
+    R @= rotate_x(-90)
+    R @= rotate_z(degree)
+    # R @= rotate_x(20)
+    R @= np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
 
     camera_position = - np.matrix(R).T @ t
     print("pose: ", camera_position)
     print("Projection Matrix: ", K @ np.concatenate([R, np.matrix(t).T], axis=1))
 
     print(np.append(camera_position, [[1]], axis=1))
-    laser_center = np.squeeze(np.asarray(camera_position)) @ rotate_y(-laser_degree_delta)
-    laser_norm = np.array([1, 0, 0]) @ rotate_x(0) @ rotate_y(degree) @ rotate_y(-laser_degree_delta)
+    laser_center = np.squeeze(np.asarray(camera_position)) @ rotate_z(laser_degree_delta)
+    laser_norm = np.array([0.5, 0, 0]) @ rotate_z(-degree) @ rotate_z(laser_degree_delta)
     print("laser center: ", laser_center)
     print("laser norm: ", laser_norm)
 
@@ -236,7 +322,8 @@ for degree, image in enumerate(left_images):
         pickle.dump(laser_norm, data_output_file)
 
     points = [project_point(p, R, t, K) for p in
-              [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 1], (laser_norm + np.array([0, 0, 0.])).tolist()]]
+              [[0, 0, 0], [0.5, 0, 0], [0, 0.5, 0], [0, 0, 0.5], [0.5, 0.5, 0.5],
+               (laser_norm + np.array([0, 0, 0.])).tolist()]]
 
     origin = points[0]
     top_x = points[1]

@@ -21,12 +21,12 @@
             <integer name="height" value="$res"/>
         </film>
         <transform name="to_world">
-            <translate z="-7"/>
+            <translate z="-1.2"/>
             <translate y="0"/>
-            <rotate x="1" angle="0"/>
-            <rotate y="1" angle="$angle"/>
+            <rotate x="1" angle="30"/>
             <!--
             -->
+            <rotate y="1" angle="$angle"/>
         </transform>
 
     </sensor>
@@ -83,9 +83,11 @@
         </transform>
         -->
         <transform name="to_world">
-            <translate z="-7"/>
+            <translate z="-1.2"/>
             <translate y="0"/>
+            <!--
             <rotate x="1" angle="0"/>
+            -->
             <rotate y="1" angle="-$laser_angle_delta"/>
             <rotate y="1" angle="$angle"/>
 
@@ -96,8 +98,8 @@
         </transform>
 
         <rgb name="intensity" value="1000, 0, 0"/>
-        <float name="cutoff_angle" value="60"/>
-        <float name="beam_width" value="60"/>
+        <float name="cutoff_angle" value="30"/>
+        <float name="beam_width" value="30"/>
         <texture name="texture" type="bitmap">
             <string name="filename" value="data/laser.bmp"/>
             <!--
