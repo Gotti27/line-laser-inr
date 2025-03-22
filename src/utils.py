@@ -1,10 +1,12 @@
 import math
 import random
+import warnings
 
 import cv2 as cv
 import numpy as np
 import pyvista as pv
 import torch
+import trimesh
 from matplotlib import pyplot as plt
 from scipy import spatial
 from sklearn.neighbors import KDTree
@@ -120,9 +122,85 @@ def knn_point_classification(external, internal, unknown, k=5):
     return ret_external, ret_internal
 
 
+def assign_ground_truth_labels(external, unknown, debug=False):
+    mesh = pv.read(f'scenes/meshes/Dragon-small.ply')
+    m = trimesh.Trimesh(mesh.points, faces=mesh.faces.reshape((mesh.n_cells, 4))[:, 1:], validate=True, process=True,
+                        use_embree=True)
+    if not m.is_watertight:
+        raise RuntimeError('not watertight')
+
+    points = external + unknown
+    points = torch.tensor(points, dtype=torch.float32)
+
+    labels = [m.contains(chunk.cpu().numpy()) for chunk in points.chunk(100)]
+    labels = np.concatenate(labels)
+    # labels = pool.map(lambda p: m.contains(p.cpu().numpy()), points.chunk(num_workers))
+    # labels = np.array(labels)
+
+    print("contains executed")
+
+    if debug:
+        p1 = pv.Plotter()
+        p1.add_points(np.array([e for i, e in enumerate(points) if labels[i]]), color='red')
+        # p1.add_points(np.array([e for i, e in enumerate(points) if not p[i]]), color='blue')
+        # p1.add_mesh(mesh, color='tan')
+        # p1.add_bounding_box([-0.5, 0.5, -0.5, 0.5, -0.5, 0.5], color='red')
+        # p1.add_arrows(mesh.points, mesh.active_normals, color='black')
+        p1.add_axes()
+        p1.show_grid()
+        p1.show()
+
+    points = points.cuda()
+    labels = torch.tensor([[0 if l else 1] for l in labels], dtype=torch.float32, requires_grad=True, device='cuda')
+
+    # torch.from_numpy(points[i]).type(torch.float32).requires_grad_(True).to(device)
+    dataset = [
+        [points[i], labels[i]]
+        for i
+        in range(len(points))]
+    print("dataset created")
+    return dataset
+
+
 def pure_knn_point_classification(external, internal, unknown, k=5):
+    flag = False
+    if flag:
+        warnings.warn("ASSIGNING GT labels")
+        return assign_ground_truth_labels(external, unknown)
     ret_external = [] + external
     ret_internal = [] + internal
+    all_points = [] + external + internal + unknown
+    all_labels = [1 for _ in external] + [-1 for _ in internal] + [0 for _ in unknown]
+    kd_tree = KDTree(np.array(all_points))
+    distances, neighbors = kd_tree.query(unknown, k=k, return_distance=True)
+
+    for i, u in enumerate(unknown):
+        point_neighbors = neighbors[i]
+        if k == 1:
+            point_class = [all_labels[point_neighbors]]
+            distances_sum = distances[i]
+        else:
+            point_class = [all_labels[n] for n in point_neighbors]
+            distances_sum = sum(distances[i])
+
+        external_score = len(
+            [p for index, p in enumerate(point_class) if p == 1])
+        unknown_score = len(
+            [p for index, p in enumerate(point_class) if p == 0])
+        internal_score = len(
+            [p for index, p in enumerate(point_class) if p == -1])
+
+        if unknown_score > external_score:
+            ret_internal.append(u)
+        else:
+            ret_external.append(u)
+
+    return ret_external, ret_internal
+
+
+def pure_knn_point_classification_eval(external, internal, unknown, k=5):
+    ret_external = []
+    ret_internal = []
     all_points = [] + external + internal + unknown
     all_labels = [1 for _ in external] + [-1 for _ in internal] + [0 for _ in unknown]
     kd_tree = KDTree(np.array(all_points))
@@ -250,6 +328,17 @@ def find_plane_line_intersection(plane, point1, point2):
     return None
 
 
+def find_plane_line_intersection_2(plane_norm, plane_center, point1, point2):
+    line_dir = point2 - point1
+    denominator = np.dot(plane_norm, line_dir)
+
+    if np.isclose(denominator, 0):
+        return None
+
+    t = np.dot(plane_norm, plane_center - point1) / denominator
+    return point1 + t * line_dir
+
+
 def find_line_equation(x1, y1, x2, y2):
     """
     Find the equation of the line passing through two points
@@ -310,6 +399,14 @@ def project_point(point, rotation_matrix, translation_vector, camera_intrinsic_m
     return [int(round(camera_p[0, 0] / camera_p[0, 2])), int(round(camera_p[0, 1] / camera_p[0, 2]))]
 
 
+def project_points(points: np.ndarray, rotation_matrix, translation_vector, camera_intrinsic_matrix):
+    points = np.append(points, np.ones((points.shape[0], 1)), axis=1)
+    camera_p = camera_intrinsic_matrix @ np.concatenate([rotation_matrix, np.matrix(translation_vector).T],
+                                                        axis=1) @ points.T
+
+    return np.round(camera_p[:2] / camera_p[2]).astype(int).T
+
+
 def cross_product_proxy(a, b):
     return np.cross(a, b)
 
@@ -332,8 +429,8 @@ def compute_laser_transformation(laser_center, laser_norm):
 def sample_point_from_plane(laser_center, laser_norm):
     R, t = compute_laser_transformation(laser_center, laser_norm)
 
-    x = random.uniform(-2, 2)
-    y = random.uniform(-6, 6)
+    x = random.uniform(-0.7, 0.7)
+    y = random.uniform(-0.5, 0.5)
 
     z = 0
 
@@ -344,6 +441,22 @@ def sample_point_from_plane(laser_center, laser_norm):
 
     world_point = np.squeeze(np.asarray(world_point))
     return [world_point[0] / world_point[3], world_point[1] / world_point[3], world_point[2] / world_point[3]]
+
+
+def sample_points_from_plane(laser_center, laser_norm, n_points):
+    R, t = compute_laser_transformation(laser_center, laser_norm)
+
+    x = np.random.uniform(-0.7, 0.7, n_points)
+    y = np.random.uniform(-0.5, 0.5, n_points)
+    z = np.zeros(n_points)
+
+    points = np.vstack([x, y, z])
+    points = np.append(points.T, np.ones((n_points, 1)), axis=1)
+
+    world_points = np.concatenate([np.concatenate([R, np.matrix(t).T], axis=1), np.array([[0, 0, 0, 1]])],
+                                  axis=0) @ points.T
+
+    return world_points[:3] / world_points[3]
 
 
 def inverse_cdf(p, x, cdf):
