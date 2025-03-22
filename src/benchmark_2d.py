@@ -15,7 +15,7 @@ model = INR2D()
 
 loss_fn = torch.nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-model.load_state_dict(torch.load('model', map_location=device))
+model.load_state_dict(torch.load('model-2d', map_location=device))
 image = np.zeros((500, 500, 1), np.uint8)
 zoom = np.zeros((500, 500, 1), np.uint8)
 

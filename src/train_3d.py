@@ -64,9 +64,9 @@ if GRADIENT_ITERATIONS > 0:
             f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')} IMAGES: {NUMBER_IMAGES} EPS: {EPSILON}\n")
 
 mesh = pv.read(f'scenes/meshes/{target}.ply')
-mesh = mesh.rotate_z(180)
-mesh = mesh.rotate_x(90)
-mesh = mesh.scale(10)
+# mesh = mesh.rotate_z(180)
+# mesh = mesh.rotate_x(90)
+# mesh = mesh.scale(10)
 mesh.compute_normals(inplace=True)
 if debug:
     p1 = pv.Plotter()
@@ -91,7 +91,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
 load = True
 if debug and load:
-    model.load_state_dict(torch.load(f'3d-model-{target}-grad', map_location=device))
+    model.load_state_dict(torch.load(f'models/3d-model-{target}-gradient', map_location=device))
 
 renders_matrices = load_renders(images, target)
 
@@ -203,15 +203,16 @@ def laser_ray_sampling(image, laser_points):
                         break
 
         '''
+        '''
         if debug:
             render = np.array(render)
             cv.drawMarker(render, p_far_point, [255, 255, 0], cv.MARKER_DIAMOND, 2, 1)
-            cv.drawMarker(render, p, [0, 0, 255], cv.MARKER_CROSS, 2, 2)
+            cv.drawMarker(render, p, [255, 0, 0], cv.MARKER_CROSS, 2, 2)
             cv.imshow('red', red_channel)
             cv.imshow('foobar', render)
             cv.waitKey(1)
         '''
-
+        '''
         if unknown:
             points.append([[x, y, z], 0])
             point_cloud_u.append([x, y, z])
@@ -231,6 +232,16 @@ def laser_ray_sampling(image, laser_points):
         point_cloud_e.plot(eye_dome_lighting=True)
         point_cloud_u.plot(eye_dome_lighting=True)
     '''
+
+    if debug:
+        depth = renders_matrices[image]['render'][:, :, 3]
+        for i in range(len(render)):
+            for j in range(len(render)):
+                if depth[i][j] == 0 and np.array_equal(render[i][j], [0, 0, 0]):
+                    render[i][j] = [1, 255, 255]
+
+        cv.imshow('foobar', render)
+        cv.waitKey(0)
 
     return points
 
@@ -351,9 +362,9 @@ def create_gradient_base_dataset(gradient_image_d, silhouette_points=3000, laser
 
     inputs = np.array([]).reshape(0, 3)
 
-    x = torch.linspace(-40, 40, 100, dtype=torch.float32, device='cpu')  # + offset
-    y = torch.linspace(-40, 0, 50, dtype=torch.float32, device='cpu')  # + offset
-    z = torch.linspace(-40, 40, 100, dtype=torch.float32, device='cpu')  # + offset
+    x = torch.linspace(-40, 40, 100, dtype=torch.float32, device='cpu') + offset_x
+    y = torch.linspace(-40, 0, 50, dtype=torch.float32, device='cpu') + offset_y
+    z = torch.linspace(-40, 40, 100, dtype=torch.float32, device='cpu') + offset_z
     X, Y, Z = torch.meshgrid(x, y, z)
     grid = torch.stack((X.flatten(), Y.flatten(), Z.flatten()), dim=-1)
 
@@ -505,10 +516,9 @@ for iteration in range(UNIFORM_ITERATIONS):
 
 
 def compute_gradient_image_from_model():
-    # offset = random.uniform(0, 80 / 100)
-    x = torch.linspace(-40, 40, 100, dtype=torch.float32, device=device, requires_grad=True)
-    y = torch.linspace(-40, 0, 50, dtype=torch.float32, device=device, requires_grad=True)
-    z = torch.linspace(-40, 40, 100, dtype=torch.float32, device=device, requires_grad=True)
+    x = torch.linspace(-40, 40, 100, dtype=torch.float32, device=device, requires_grad=True) + offset_x
+    y = torch.linspace(-40, 0, 50, dtype=torch.float32, device=device, requires_grad=True) + offset_y
+    z = torch.linspace(-40, 40, 100, dtype=torch.float32, device=device, requires_grad=True) + offset_z
 
     X, Y, Z = torch.meshgrid(x, y, z)
 
@@ -590,6 +600,8 @@ def laser_ray_gradient_sampling(image, gradient_image, laser_points=300):
 
     # sampled_points.cpu().detach().numpy()
 
+    render = np.array(render)
+
     for [x, y, z] in sampled_points:  # .flatten(start_dim=0, end_dim=1):
         # print(x, y, z)
         p = project_point([x, y, z], R, t, K)
@@ -626,12 +638,14 @@ def laser_ray_gradient_sampling(image, gradient_image, laser_points=300):
                         break
 
         '''
+        '''
         if debug:
-            cv.drawMarker(render, p_far_point, [255, 255, 0], cv2.MARKER_DIAMOND, 2, 1)
-            cv.drawMarker(render, p, [0, 0, 255], cv.MARKER_CROSS, 2, 2)
+            cv.drawMarker(render, p_far_point, [255, 255, 0], cv.MARKER_DIAMOND, 2, 1)
+            cv.drawMarker(render, p, [255, 0, 0], cv.MARKER_CROSS, 2, 2)
             cv.imshow('red', red_channel)
             cv.imshow('foobar', render)
             cv.waitKey(1)
+        '''
         '''
 
         if unknown:
@@ -653,6 +667,16 @@ def laser_ray_gradient_sampling(image, gradient_image, laser_points=300):
         point_cloud_e.plot(eye_dome_lighting=True)
         point_cloud_u.plot(eye_dome_lighting=True)
     '''
+
+    if debug:
+        depth = renders_matrices[image]['render'][:, :, 3]
+        for i in range(len(render)):
+            for j in range(len(render)):
+                if depth[i][j] == 0 and np.array_equal(render[i][j], [0, 0, 0]):
+                    render[i][j] = [1, 255, 255]
+
+        cv.imshow('foobar', render)
+        cv.waitKey(0)
 
     return points
 
@@ -690,12 +714,16 @@ def train_one_epoch_gradient(epoch_index, tb_writer):
 
 
 model.train(False)
-torch.save(model.state_dict(), f'3d-model-{target}')
+torch.save(model.state_dict(), f'3d-model-{target}-{mode}')
 print("Uniform training completed, intermediate model saved")
 model.train(True)
 
 for iteration in range(GRADIENT_ITERATIONS):
     print(f"iteration: {iteration}")
+    offset_x = random.uniform(0, 80 / 100)
+    offset_y = random.uniform(0, 40 / 100)
+    offset_z = random.uniform(0, 80 / 100)
+
     gradient_image, model_output_grid = compute_gradient_image_from_model()
     gradient_image = gradient_image.view(100, 50, 100)
     model_output_grid = model_output_grid.view(100, 50, 100)
@@ -721,6 +749,11 @@ for iteration in range(GRADIENT_ITERATIONS):
         plt.show(block=True)
 
         plane = gradient_image[:, :, 50]
+        fig = plt.figure()
+        plt.imshow(plane)
+        plt.show(block=True)
+
+        plane = model_output_grid[:, :, 50]
         fig = plt.figure()
         plt.imshow(plane)
         plt.show(block=True)
@@ -771,7 +804,7 @@ if GRADIENT_ITERATIONS > 0:
         history.write(f"done {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}\n")
 
 model.train(False)
-torch.save(model.state_dict(), f'3d-model-{target}')
+torch.save(model.state_dict(), f'3d-model-{target}-{mode}')
 
 if debug:
     cv.waitKey(0)
