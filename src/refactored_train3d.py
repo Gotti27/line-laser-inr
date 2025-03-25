@@ -3,6 +3,7 @@ import copy
 import os
 from datetime import datetime
 
+import multiprocess
 import torch.utils.data
 from torch.utils.tensorboard import SummaryWriter
 
@@ -31,7 +32,7 @@ if mode != 'uniform' and mode != 'gradient':
     raise RuntimeError("mode not valid")
 
 UNIFORM_ITERATIONS = 10 if mode == 'uniform' else 0
-UNIFORM_TRAINING_EPOCHS = 200
+UNIFORM_TRAINING_EPOCHS = 2000
 
 np.bool = np.bool_
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
@@ -77,7 +78,7 @@ model = model.to(device)
 loss_fn = torch.nn.BCELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=optimizer,
-                                                   gamma=0.01 ** (1 / 100))  # gamma=0.01 # gamma=0.01 ** (1 / 5000)
+                                                   gamma=0.01 ** (1 / 50))  # gamma=0.01 # gamma=0.01 ** (1 / 5000)
 
 load = False
 if debug and load:
@@ -87,10 +88,8 @@ renders_matrices = load_renders(images, target)
 
 
 def efficient_silhouette_sampling(points: np.ndarray):
-    labels = np.full(points.shape[0], np.False_)
-
-    for image in images:
-        render_depth = cv.imread(os.path.join(image_folder, image), cv.IMREAD_UNCHANGED)
+    def sample_from_image(image):
+        render_depth = renders_matrices[image]['render']
 
         K = renders_matrices[image]['K']
         R = renders_matrices[image]['R']
@@ -110,7 +109,6 @@ def efficient_silhouette_sampling(points: np.ndarray):
         valid_points = np.squeeze(np.asarray(valid_points))
 
         temp_depth = copy.deepcopy(render_depth[:, :, 3])
-        depth_mask = render_depth[valid_points[:, 1], valid_points[:, 0], 3] == 0
         render_depth[valid_points[:, 1], valid_points[:, 0]] = np.array([0, 255, 0, 0])
         # render_depth[valid_points[:, 1], valid_points[:, 0], ~depth_mask] = np.array([0, 0, 255, 0])
         render_depth[:, :, 3] = temp_depth
@@ -120,32 +118,14 @@ def efficient_silhouette_sampling(points: np.ndarray):
         temp_labels = np.full((points.shape[0]), np.False_, dtype=np.bool_)
         temp_labels[valid_indices] = temp_depth[valid_points[:, 1], valid_points[:, 0]] == 0.0
 
-        ###
-        labels |= temp_labels
+        return temp_labels
 
-        cv.imshow("Projected Points", render_depth)
-        cv.waitKey(1)
+    pool = multiprocess.Pool(num_workers)
+    result = pool.map(sample_from_image, images)
 
-    cv.destroyAllWindows()
+    labels = np.logical_or.reduce(result)
+
     return labels
-
-
-def silhouette_sampling(point):
-    x, y, z = point
-    # for image in list(filter(lambda img: 'right' in img, images)):
-    for image in images:
-        K = renders_matrices[image]['K']
-        R = renders_matrices[image]['R']
-        t = renders_matrices[image]['t']
-        render_depth = renders_matrices[image]['render']
-
-        p = project_point([x, y, z], R, t, K)
-        depth = render_depth[:, :, 3]
-
-        is_outside = p[0] < 0 or p[0] >= 256 or p[1] < 0 or p[1] >= 256
-        if not is_outside and depth[p[1], p[0]] == 0:
-            return 1
-    return -1
 
 
 def laser_ray_sampling(image, laser_points):
@@ -262,13 +242,14 @@ def laser_ray_sampling(image, laser_points):
             dataset.append([original_point, 1])
             point_cloud_e.append(original_point)
 
-    pl = pv.Plotter()
-    pl.add_mesh(mesh)
-    # pl.add_points(pv.PolyData(np.array(point_cloud_u)), color='red')
-    pl.add_points(pv.PolyData(np.array(point_cloud_e)), color='green')
-    pl.enable_eye_dome_lighting()
-    pl.show_grid()
-    pl.show()
+    if debug:
+        pl = pv.Plotter()
+        pl.add_mesh(mesh)
+        pl.add_points(pv.PolyData(np.array(point_cloud_u)), color='red')
+        pl.add_points(pv.PolyData(np.array(point_cloud_e)), color='green')
+        pl.enable_eye_dome_lighting()
+        pl.show_grid()
+        pl.show()
 
     return dataset
 
@@ -426,7 +407,7 @@ def train_one_epoch_uniformly(epoch_index, tb_writer):
 
 for epoch in range(UNIFORM_TRAINING_EPOCHS):
     print(f"iteration: {epoch}")
-    uniform_dataset = INRPointsDataset(create_uniform_dataset(2 ** 15, 0))  # (((2 ** 15)) // len(images))
+    uniform_dataset = INRPointsDataset(create_uniform_dataset(200000, 0))  # (((2 ** 15)) // len(images))
 
     '''
     uniform_dataset_train, uniform_dataset_val = torch.utils.data.random_split(uniform_dataset, [.8, .2],
@@ -476,6 +457,11 @@ for epoch in range(UNIFORM_TRAINING_EPOCHS):
     # print(f"EVAL ERR: {abs_error} {mae_error[0]} {rmse_error[0]} {rmse_error[2]}")
     # with open(f"history-{target}-uniform.txt", "a+") as history:
     #    history.write(f"{abs_error} {mae_error[0]} {rmse_error[0]} {rmse_error[2]}\n")
+
+    if epoch_number % 50 == 0:
+        # scheduler.step()
+        model.train(False)
+        torch.save(model.state_dict(), f'3d-model-{target}-{epoch_number}')
 
 print(f"done {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
 
