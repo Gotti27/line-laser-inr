@@ -6,18 +6,24 @@ import time
 import cv2 as cv
 import mitsuba as mi
 import numpy as np
+import torch
 
 from utils import rotate_x, project_point, rotate_z
 
 print(mi.variants())
-mi.set_variant('scalar_rgb')
+
+if torch.cuda.is_available():
+    mi.set_variant('cuda_ad_rgb')
+else:
+    mi.set_variant('scalar_rgb')
 # mi.set_variant('llvm_ad_rgb')
 
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
 # Execution flags
 testing = False  # Just fooling the static analyzer :)
-do_all_renders = False
+do_all_renders = True
+debug = not torch.cuda.is_available()
 laser_degree_delta = 30
 target = 'Dragon-small'
 target_mesh = target + '.ply'
@@ -240,36 +246,41 @@ for degree, image in enumerate(right_images):
         pickle.dump(laser_center, data_output_file)
         pickle.dump(laser_norm, data_output_file)
 
-    points = [project_point(p, R, t, K) for p in
-              [[0, 0, 0], [0.5, 0, 0], [0, 0.5, 0], [0, 0, 0.5], [0.5, 0.5, 0.5],
-               (laser_norm + np.array([0, 0, 0.])).tolist()]]
+    if debug:
+        points = [project_point(p, R, t, K) for p in
+                  [[0, 0, 0], [0.5, 0, 0], [0, 0.5, 0], [0, 0, 0.5], [0.5, 0.5, 0.5],
+                   (laser_norm + np.array([0, 0, 0.])).tolist()]]
 
-    origin = points[0]
-    top_x = points[1]
-    top_y = points[2]
-    top_z = points[3]
-    norm_test = points[5]
+        origin = points[0]
+        top_x = points[1]
+        top_y = points[2]
+        top_z = points[3]
+        norm_test = points[5]
 
-    cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_x[0])), int(round(top_x[1]))],
-            [0, 0, 255], 1)
-    cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_y[0])), int(round(top_y[1]))],
-            [0, 255, 0], 1)
-    cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_z[0])), int(round(top_z[1]))],
-            [255, 0, 0], 1)
-    cv.line(render, [int(round(origin[0])), int(round(origin[1]))],
-            [int(round(norm_test[0])), int(round(norm_test[1]))],
-            [255, 255, 0], 1)
+        cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_x[0])), int(round(top_x[1]))],
+                [0, 0, 255], 1)
+        cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_y[0])), int(round(top_y[1]))],
+                [0, 255, 0], 1)
+        cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_z[0])), int(round(top_z[1]))],
+                [255, 0, 0], 1)
+        cv.line(render, [int(round(origin[0])), int(round(origin[1]))],
+                [int(round(norm_test[0])), int(round(norm_test[1]))],
+                [255, 255, 0], 1)
 
-    cv.putText(render, "x", [int(round(top_x[0])), int(round(top_x[1]))], cv.FONT_HERSHEY_SIMPLEX, 0.5, [0, 0, 255], 1)
-    cv.putText(render, "y", [int(round(top_y[0])), int(round(top_y[1]))], cv.FONT_HERSHEY_SIMPLEX, 0.5, [0, 255, 0], 1)
-    cv.putText(render, "z", [int(round(top_z[0])), int(round(top_z[1]))], cv.FONT_HERSHEY_SIMPLEX, 0.5, [255, 0, 0], 1)
+        cv.putText(render, "x", [int(round(top_x[0])), int(round(top_x[1]))], cv.FONT_HERSHEY_SIMPLEX, 0.5, [0, 0, 255],
+                   1)
+        cv.putText(render, "y", [int(round(top_y[0])), int(round(top_y[1]))], cv.FONT_HERSHEY_SIMPLEX, 0.5, [0, 255, 0],
+                   1)
+        cv.putText(render, "z", [int(round(top_z[0])), int(round(top_z[1]))], cv.FONT_HERSHEY_SIMPLEX, 0.5, [255, 0, 0],
+                   1)
 
-    # normalized_depth_map = cv.normalize(depth_map, None, 0, 255, cv.NORM_MINMAX, dtype=cv.CV_8U)
-    # cv.imshow("render depth", normalized_depth_map)
-    # cv.imshow("positions", position)
+        # normalized_depth_map = cv.normalize(depth_map, None, 0, 255, cv.NORM_MINMAX, dtype=cv.CV_8U)
+        # cv.imshow("render depth", normalized_depth_map)
+        # cv.imshow("positions", position)
 
-    cv.imshow("render", render)
-    cv.waitKey(1)
+        cv.imshow("render", render)
+        cv.waitKey(1)
+
     time.sleep(1 / 60)
     # video.write(render)
     # video_depth.write(rendered_depth_map)
@@ -321,36 +332,41 @@ for degree, image in enumerate(left_images):
         pickle.dump(laser_center, data_output_file)
         pickle.dump(laser_norm, data_output_file)
 
-    points = [project_point(p, R, t, K) for p in
-              [[0, 0, 0], [0.5, 0, 0], [0, 0.5, 0], [0, 0, 0.5], [0.5, 0.5, 0.5],
-               (laser_norm + np.array([0, 0, 0.])).tolist()]]
+    if debug:
+        points = [project_point(p, R, t, K) for p in
+                  [[0, 0, 0], [0.5, 0, 0], [0, 0.5, 0], [0, 0, 0.5], [0.5, 0.5, 0.5],
+                   (laser_norm + np.array([0, 0, 0.])).tolist()]]
 
-    origin = points[0]
-    top_x = points[1]
-    top_y = points[2]
-    top_z = points[3]
-    norm_test = points[5]
+        origin = points[0]
+        top_x = points[1]
+        top_y = points[2]
+        top_z = points[3]
+        norm_test = points[5]
 
-    cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_x[0])), int(round(top_x[1]))],
-            [0, 0, 255], 1)
-    cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_y[0])), int(round(top_y[1]))],
-            [0, 255, 0], 1)
-    cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_z[0])), int(round(top_z[1]))],
-            [255, 0, 0], 1)
-    cv.line(render, [int(round(origin[0])), int(round(origin[1]))],
-            [int(round(norm_test[0])), int(round(norm_test[1]))],
-            [255, 255, 0], 1)
+        cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_x[0])), int(round(top_x[1]))],
+                [0, 0, 255], 1)
+        cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_y[0])), int(round(top_y[1]))],
+                [0, 255, 0], 1)
+        cv.line(render, [int(round(origin[0])), int(round(origin[1]))], [int(round(top_z[0])), int(round(top_z[1]))],
+                [255, 0, 0], 1)
+        cv.line(render, [int(round(origin[0])), int(round(origin[1]))],
+                [int(round(norm_test[0])), int(round(norm_test[1]))],
+                [255, 255, 0], 1)
 
-    cv.putText(render, "x", [int(round(top_x[0])), int(round(top_x[1]))], cv.FONT_HERSHEY_SIMPLEX, 0.5, [0, 0, 255], 1)
-    cv.putText(render, "y", [int(round(top_y[0])), int(round(top_y[1]))], cv.FONT_HERSHEY_SIMPLEX, 0.5, [0, 255, 0], 1)
-    cv.putText(render, "z", [int(round(top_z[0])), int(round(top_z[1]))], cv.FONT_HERSHEY_SIMPLEX, 0.5, [255, 0, 0], 1)
+        cv.putText(render, "x", [int(round(top_x[0])), int(round(top_x[1]))], cv.FONT_HERSHEY_SIMPLEX, 0.5, [0, 0, 255],
+                   1)
+        cv.putText(render, "y", [int(round(top_y[0])), int(round(top_y[1]))], cv.FONT_HERSHEY_SIMPLEX, 0.5, [0, 255, 0],
+                   1)
+        cv.putText(render, "z", [int(round(top_z[0])), int(round(top_z[1]))], cv.FONT_HERSHEY_SIMPLEX, 0.5, [255, 0, 0],
+                   1)
 
-    # normalized_depth_map = cv.normalize(depth_map, None, 0, 255, cv.NORM_MINMAX, dtype=cv.CV_8U)
-    # cv.imshow("render depth", normalized_depth_map)
-    # cv.imshow("positions", position)
+        # normalized_depth_map = cv.normalize(depth_map, None, 0, 255, cv.NORM_MINMAX, dtype=cv.CV_8U)
+        # cv.imshow("render depth", normalized_depth_map)
+        # cv.imshow("positions", position)
 
-    cv.imshow("render", render)
-    cv.waitKey(1)
+        cv.imshow("render", render)
+        cv.waitKey(1)
+
     time.sleep(1 / 60)
     # video.write(render)
     # video_depth.write(rendered_depth_map)
