@@ -75,39 +75,4 @@
         </transform>
     </emitter>
 
-    <emitter type="spot">
-        <!--
-        <transform name="to_world">
-            <lookat origin="-5, 3, -10" target="0, 0, 0" up="0, 1, 0"/>
-            <rotate y="1" angle="$angle"/>
-        </transform>
-        -->
-        <transform name="to_world">
-            <translate z="-1.2"/>
-            <translate y="0"/>
-            <rotate x="1" angle="30"/>
-            <!--
-            <rotate x="1" angle="0"/>
-            -->
-            <rotate y="1" angle="-$laser_angle_delta"/>
-            <rotate y="1" angle="$angle"/>
-
-
-            <!--
-            <lookat origin="0, 0, -7" target="0, 0, 0" up="0, 1, 0"/>
-            -->
-        </transform>
-
-        <rgb name="intensity" value="1000, 0, 0"/>
-        <float name="cutoff_angle" value="30"/>
-        <float name="beam_width" value="30"/>
-        <texture name="texture" type="bitmap">
-            <string name="filename" value="data/laser.bmp"/>
-            <!--
-                <string name="wrap_mode" value="mirror"/>
-            -->
-        </texture>
-
-    </emitter>
-
 </scene>
