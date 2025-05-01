@@ -2,6 +2,7 @@ import argparse
 import copy
 import os
 from datetime import datetime
+from pathlib import Path
 
 import multiprocess
 import torch.utils.data
@@ -39,6 +40,11 @@ os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 pv.global_theme.allow_empty_mesh = True
 
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+training_directory = f"models/{timestamp}_{target}"
+Path(training_directory).mkdir(parents=True, exist_ok=True)
+print("Directory created")
+
 writer = SummaryWriter('runs/model_trainer_{}'.format(timestamp))
 epoch_number = 0
 best_validation_loss = 1_000_000.
@@ -78,18 +84,23 @@ model = model.to(device)
 loss_fn = torch.nn.BCELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=optimizer,
-                                                   gamma=0.01 ** (1 / 50))  # gamma=0.01 # gamma=0.01 ** (1 / 5000)
+                                                   gamma=0.01 ** (1 / 25))  # gamma=0.01 # gamma=0.01 ** (1 / 5000)
 
+'''
 load = False
 if debug and load:
     model.load_state_dict(torch.load(f'models/3d-model-{target}-gradient', map_location=device))
+'''
 
-renders_matrices = load_renders(images, target)
+renders_matrices = load_renders(images, target, debug)
 
 
 def efficient_silhouette_sampling(points: np.ndarray):
     def sample_from_image(image):
-        render_depth = renders_matrices[image]['render']
+        if debug:
+            render_depth = cv.imread(renders_matrices[image]['render'], cv.IMREAD_UNCHANGED)
+        else:
+            render_depth = renders_matrices[image]['render']
 
         K = renders_matrices[image]['K']
         R = renders_matrices[image]['R']
@@ -147,111 +158,64 @@ def laser_ray_sampling(image, laser_points):
     _, red_channel = cv.threshold(red_channel, 100, 255, cv.THRESH_BINARY)
 
     camera_position = np.squeeze(np.asarray(- np.matrix(R).T @ t))
-    point_cloud_e = []
-    point_cloud_u = []
-
-    '''
-    for [u, v] in np.column_stack(np.where(red_channel > 0)):
-        laser_point_camera = np.array(
-            [v - (red_channel.shape[1] / 2), u - (red_channel.shape[0] / 2), K[0][0], 1])
-        laser_point_world = np.concatenate([
-            np.concatenate([R.T, np.array(- R.T @ t).reshape(3, 1)], axis=1),
-            np.array([[0, 0, 0, 1]])
-        ], axis=0) @ laser_point_camera
-
-        laser_point_world = [laser_point_world[0] / laser_point_world[3],
-                             laser_point_world[1] / laser_point_world[3],
-                             laser_point_world[2] / laser_point_world[3]]
-
-        world_point = np.squeeze(
-            np.asarray(find_plane_line_intersection([a, b, c, d], camera_position, np.array(laser_point_world)))
-        )
-
-        points.append([world_point, -1])
-    '''
-
-    '''
-    if debug:
-        render = np.array(render)
-        for p in points:
-            cv.drawMarker(render, project_point(p[0].tolist(), R, t, K), [0, 255, 0], cv.MARKER_TILTED_CROSS, 1, 1)
-
-        cv.imshow('foobar', render)
-        cv.waitKey(0)
-    '''
-
     p_laser_center = project_point([laser_center[0], laser_center[1], laser_center[2]], R, t, K)
-    p_laser_center = np.array(p_laser_center)
-    points = sample_points_from_plane([0, 0, 0], laser_norm, laser_points).T
-    projected_points_camera = project_points(points, R, t, K)
-    dataset = []
 
-    projected_points_camera = np.asarray(projected_points_camera)
-    points = np.asarray(points)
-    for index in range(points.shape[0]):
-        original_point = points[index]
-        p = projected_points_camera[index]
+    sampled_points = sample_points_from_plane([0, 0, 0], laser_norm, laser_points).T
 
-        '''
-        direction = -laser_center[1] / (y - laser_center[1])
-        far_point = (
-            laser_center[0] + direction * (x - laser_center[0]), 0, laser_center[2] + direction * (z - laser_center[2]))
+    projected_sampled_points = project_points(sampled_points, R, t, K)
 
-        p_far_point = np.array([far_point[0], far_point[1], far_point[2], 1.])
-        p_far_point = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ p_far_point
-        p_far_point = [int(round(p_far_point[0, 0] / p_far_point[0, 2])),
-                       int(round(p_far_point[0, 1] / p_far_point[0, 2]))]
-        '''
+    for sampled_point, projected_point in zip(np.squeeze(np.asarray(sampled_points)),
+                                              np.squeeze(np.asarray(projected_sampled_points))):
 
-        p_far_point = [int(round(i)) for i in p_laser_center + 2 * (p - p_laser_center)]
+        p_far_point = [int(round(i)) for i in
+                       np.array(p_laser_center) + 2 * (projected_point - np.array(p_laser_center))]
 
-        line_points = [line_point for line_point in bresenham(p_far_point[0], p_far_point[1], p[0], p[1])]
+        line_points = [line_point for line_point in
+                       bresenham(p_far_point[0], p_far_point[1], projected_point[0], projected_point[1])]
         if side == 'right':
             line_points.reverse()
 
         unknown = True
         for point in line_points:
-            if 0 < point[1] < 1024 and 0 < point[0] < 1024:
-                render[point[1], point[0], 1] = 255
-
-            if 0 < point[1] < 1024 and 0 < point[0] < 1024 and red_channel[point[1], point[0]] > 200:
+            if 0 < point[1] < red_channel.shape[0] and 0 < point[0] < red_channel.shape[1] \
+                    and red_channel[point[1], point[0]] > 200:
                 unknown = False
                 break
 
         '''
-        if not unknown:
-            for point in line_points:
-                if 0 < point[1] < 256 and 0 < point[0] < 256:
-                    render[point[1], point[0]] = [0, 255, 0]
-                    if red_channel[point[1], point[0]] > 200:
-                        break
-
-        '''
         if debug:
+            if not unknown:
+                for point in line_points:
+                    if 0 < point[1] < 1024 and 0 < point[0] < 1024:
+                        render[point[1], point[0]] = [0, 255, 0]
+                        if red_channel[point[1], point[0]] > 200:
+                            break
+
             render = np.array(render)
             cv.drawMarker(render, p_far_point, [255, 255, 0], cv.MARKER_DIAMOND, 2, 1)
-            cv.drawMarker(render, p, [255, 0, 0], cv.MARKER_CROSS, 2, 2)
+            cv.drawMarker(render, projected_point, [255, 0, 0], cv.MARKER_CROSS, 2, 2)
             cv.imshow('red', red_channel)
             cv.imshow('foobar', render)
             cv.waitKey(1)
-
+        '''
         if unknown:
-            dataset.append([original_point, 0])
-            point_cloud_u.append(original_point)
+            points.append([sampled_point, 0])
         else:
-            dataset.append([original_point, 1])
-            point_cloud_e.append(original_point)
+            points.append([sampled_point, 1])
 
+    '''
     if debug:
-        pl = pv.Plotter()
-        pl.add_mesh(mesh)
-        pl.add_points(pv.PolyData(np.array(point_cloud_u)), color='red')
-        pl.add_points(pv.PolyData(np.array(point_cloud_e)), color='green')
-        pl.enable_eye_dome_lighting()
-        pl.show_grid()
-        pl.show()
+        depth = renders_matrices[image]['render'][:, :, 3]
+        for i in range(len(render)):
+            for j in range(len(render)):
+                if depth[i][j] == 0 and np.array_equal(render[i][j], [0, 0, 0]):
+                    render[i][j] = [1, 255, 255]
 
-    return dataset
+        cv.imshow('foobar', render)
+        cv.waitKey(0)
+    '''
+
+    return points
 
 
 def create_uniform_dataset(silhouette_points=3000, laser_points=300):
@@ -290,8 +254,9 @@ def create_uniform_dataset(silhouette_points=3000, laser_points=300):
     '''
     external = points[labels]
     unknown = points[~labels]
+    external_laser = []
+    unknown_laser = []
 
-    '''
     sampling_list = images.copy()
     to_check = []
     for _ in range(len(sampling_list)):
@@ -299,17 +264,38 @@ def create_uniform_dataset(silhouette_points=3000, laser_points=300):
         sampling_list.remove(image)
         for point, label in laser_ray_sampling(image, laser_points):
             if label == 1:
-                external.append(point)
+                external_laser.append(point)
             elif label == 0:
                 to_check.append(point)
             else:
                 pass
                 # internal.append(point)
 
+    to_check = np.array(to_check)
     labels = efficient_silhouette_sampling(to_check)
+    external_laser = np.concatenate([np.array(external_laser), to_check[labels]])
 
-    external.extend(to_check[labels].tolist())
-    unknown.extend(to_check[~labels].tolist())
+    external = np.concatenate([external, np.array(external_laser)])
+    unknown = np.concatenate([unknown, to_check[~labels]])
+    # unknown = np.concatenate([unknown, np.array(unknown_laser)])
+    # labels = efficient_silhouette_sampling(to_check)
+
+    # external.extend(to_check[labels].tolist())
+    # unknown.extend(to_check[~labels].tolist())
+
+    '''
+    external_laser = np.array(external_laser)
+    unknown_laser = np.array(unknown_laser)
+
+    external_laser = external_laser[
+        np.random.choice(external_laser.shape[0], replace=False, size=silhouette_points)]
+
+    external = np.concatenate([external, np.array(external_laser)])
+    # unknown = np.concatenate([unknown, np.array(unknown_laser)])
+    # labels = efficient_silhouette_sampling(to_check)
+
+    # external.extend(to_check[labels].tolist())
+    # unknown.extend(to_check[~labels].tolist())
     '''
 
     print("Uniform raw dataset created - executing KNN")
@@ -407,7 +393,8 @@ def train_one_epoch_uniformly(epoch_index, tb_writer):
 
 for epoch in range(UNIFORM_TRAINING_EPOCHS):
     print(f"iteration: {epoch}")
-    uniform_dataset = INRPointsDataset(create_uniform_dataset(200000, 0))  # (((2 ** 15)) // len(images))
+    uniform_dataset = INRPointsDataset(create_uniform_dataset(200000, 200))  # (((2 ** 15)) // len(images))
+    # 200000
 
     '''
     uniform_dataset_train, uniform_dataset_val = torch.utils.data.random_split(uniform_dataset, [.8, .2],
@@ -458,10 +445,10 @@ for epoch in range(UNIFORM_TRAINING_EPOCHS):
     # with open(f"history-{target}-uniform.txt", "a+") as history:
     #    history.write(f"{abs_error} {mae_error[0]} {rmse_error[0]} {rmse_error[2]}\n")
 
-    if epoch_number % 50 == 0:
+    if epoch_number % 10 == 0:
         # scheduler.step()
         model.train(False)
-        torch.save(model.state_dict(), f'3d-model-{target}-{epoch_number}')
+        torch.save(model.state_dict(), f'{training_directory}/3d-model-{target}-{epoch_number}')
 
 print(f"done {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
 
@@ -470,7 +457,7 @@ if UNIFORM_ITERATIONS > 0:
         history.write(f"done {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}\n")
 
 model.train(False)
-torch.save(model.state_dict(), f'3d-model-{target}-{mode}')
+torch.save(model.state_dict(), f'{training_directory}/3d-model-{target}-{mode}')
 
 if debug:
     cv.waitKey(0)
