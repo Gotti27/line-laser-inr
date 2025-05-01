@@ -22,6 +22,7 @@ os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
 # Execution flags
 testing = False  # Just fooling the static analyzer :)
+with_laser = True
 do_all_renders = True
 debug = not torch.cuda.is_available()
 laser_degree_delta = 30
@@ -58,9 +59,8 @@ bel = []
 foo.append([0, 0, 0])
 
 if testing:
-    testing_angle = 45
-    scene = mi.load_file("scenes/gear_left.xml", angle=testing_angle, target=target_mesh,
-                         laser_angle_delta=laser_degree_delta, res=256)
+    testing_angle = 0
+    scene = mi.load_file("scenes/gear_left.xml", angle=testing_angle, target=target_mesh, res=256)
 
     image = mi.render(scene, spp=256)
     print(image)
@@ -182,27 +182,36 @@ if testing:
 
     exit(0)
 
+if with_laser:
+    image_folder = f'renders/{target}'
+else:
+    image_folder = f'renders/{target}-no-laser'
+
 
 def do_renders(side):
     for i in range(0, 360):
-        rendered_image = mi.render(
-            mi.load_file(f"scenes/gear_{side}.xml", angle=i, target=target_mesh, laser_angle_delta=laser_degree_delta,
-                         res=1024), spp=256)
+        if with_laser:
+            render_configuration = mi.load_file(f"scenes/gear_{side}.xml", angle=i, target=target_mesh,
+                                                laser_angle_delta=laser_degree_delta,
+                                                res=1024)
+        else:
+            render_configuration = mi.load_file(f"scenes/gear_{side}_nolaser.xml", angle=i, target=target_mesh,
+                                                res=1024)
+
+        rendered_image = mi.render(render_configuration, spp=256)
         # cv.imshow("rendering progress", np.array(rendered_image))
         # cv.waitKey(1)
-        mi.util.write_bitmap(f"renders/{target}/data_{i}_{side}_render.exr", rendered_image)
+        mi.util.write_bitmap(f"{image_folder}/data_{i}_{side}_render.exr", rendered_image)
 
         print(f"{round(i / 360 * 100)}%")
 
 
 if do_all_renders:
-    if not os.path.exists(f"renders/{target}"):
-        os.makedirs(f'renders/{target}')
+    if not os.path.exists(image_folder):
+        os.makedirs(image_folder)
     do_renders('right')
     do_renders('left')
     time.sleep(1)
-
-image_folder = f'renders/{target}'
 
 # process right images
 right_images = [img for img in os.listdir(image_folder) if img.endswith(".exr") and ('right' in img)]
@@ -239,7 +248,7 @@ for degree, image in enumerate(right_images):
     print("laser center: ", laser_center)
     print("laser norm: ", laser_norm)
 
-    with open(f'renders/{target}/data_{degree}_right.pkl', 'wb') as data_output_file:
+    with open(f'{image_folder}/data_{degree}_right.pkl', 'wb') as data_output_file:
         pickle.dump(K, data_output_file)
         pickle.dump(R, data_output_file)
         pickle.dump(t, data_output_file)
@@ -325,7 +334,7 @@ for degree, image in enumerate(left_images):
     print("laser center: ", laser_center)
     print("laser norm: ", laser_norm)
 
-    with open(f'renders/{target}/data_{degree}_left.pkl', 'wb') as data_output_file:
+    with open(f'{image_folder}/data_{degree}_left.pkl', 'wb') as data_output_file:
         pickle.dump(K, data_output_file)
         pickle.dump(R, data_output_file)
         pickle.dump(t, data_output_file)

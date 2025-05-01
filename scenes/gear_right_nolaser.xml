@@ -22,6 +22,9 @@
         </film>
         <transform name="to_world">
             <translate z="-1.2"/>
+            <!--
+            <translate z="-2.2"/>
+            -->
             <translate y="0"/>
             <rotate y="1" angle="$angle"/>
             <!--
@@ -38,6 +41,9 @@
         </bsdf>
         <transform name="to_world">
             <rotate x="1" angle="-90"/>
+            <!--
+            <scale x="2" y="2" z="2"/>
+            -->
             <!--<scale value="0.8"/>-->
         </transform>
     </shape>
@@ -55,8 +61,8 @@
     </shape>
     -->
 
+    <!--
     <emitter type="point" id="light1">
-        <!-- <point name="position" x="3" y="0" z="-10"/> -->
         <rgb name="intensity" value="30.0"/>
         <transform name="to_world">
             <translate z="-10"/>
@@ -66,13 +72,33 @@
     </emitter>
 
     <emitter type="point" id="light2">
-        <!-- <point name="position" x="-3" y="0.0" z="-10"/> -->
         <rgb name="intensity" value="30.0"/>
         <transform name="to_world">
             <translate z="-10"/>
             <translate x="-3"/>
             <rotate y="1" angle="$angle"/>
         </transform>
+    </emitter>
+    -->
+
+    <emitter type="point">
+        <point name="position" value="0.0, 0.0, 5.0"/>
+        <rgb name="intensity" value="50, 50, 0"/>
+    </emitter>
+
+    <emitter type="point">
+        <point name="position" value="0.0, 0.0, -5.0"/>
+        <rgb name="intensity" value="50, 0, 0"/>
+    </emitter>
+
+    <emitter type="point">
+        <point name="position" value="5.0, 0.0, 0.0"/>
+        <rgb name="intensity" value="0, 50, 0"/>
+    </emitter>
+
+    <emitter type="point">
+        <point name="position" value="-5.0, 0.0, 0.0"/>
+        <rgb name="intensity" value="0, 0, 50"/>
     </emitter>
 
 </scene>
