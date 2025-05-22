@@ -3,7 +3,6 @@ import os
 from datetime import datetime
 
 import torch.utils.data
-import trimesh
 from torch.utils.tensorboard import SummaryWriter
 
 from dataset import INRPointsDataset
@@ -16,8 +15,8 @@ args = parser.parse_args()
 
 target = args.target if args.target is not None else 'Dragon'
 num_workers = int(os.cpu_count())
-TRAINING_EPOCHS = 200  # 10000
-NUMBER_OF_POINTS = 170000  # 2 ** 15
+TRAINING_EPOCHS = 10000
+NUMBER_OF_POINTS = 2 ** 15
 
 np.bool = np.bool_
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
@@ -37,7 +36,8 @@ with open(f"history-{target}.txt", "a+") as history:
     history.write(f"Started {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}")
 
 # Load mesh and rescaling in - 0.5, 0.5 bounding box
-mesh = pv.read(f'scenes/meshes/Dragon.ply')  # pv.examples.download_dragon()
+target = 'igea'
+mesh = pv.read(f'scenes/meshes/{target}.ply')  # pv.examples.download_dragon()
 # mesh.compute_normals(inplace=True)
 mesh = mesh.translate([-dim for dim in mesh.center])
 x_length = mesh.bounds[1] - mesh.bounds[0]
@@ -48,6 +48,7 @@ max_length = max(x_length, y_length, z_length)
 scaling_factor = 1 / max_length
 
 mesh = mesh.scale([scaling_factor, scaling_factor, scaling_factor])
+mesh.save(f'scenes/meshes/{target}-small.ply')
 print(mesh.bounds)
 
 if debug:
@@ -66,8 +67,14 @@ model = INR3D(device=device)
 model = model.to(device)
 loss_fn = torch.nn.BCELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=5 * (10 ** -4))  # lr=0.001)  #
-scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=optimizer,
-                                                   gamma=0.01 ** (1 / 100))  # gamma=0.01 # gamma=0.01 ** (1 / 5000)
+
+
+def lr_lambda(step):
+    return 0.1 ** (step / 5000)
+
+
+# scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=0.01 ** (1 / 5000))
+scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer=optimizer, lr_lambda=lr_lambda)
 
 
 def create_dataset():
@@ -140,7 +147,7 @@ training_loader = None
 
 for epoch in range(TRAINING_EPOCHS):
     print('EPOCH {}:'.format(epoch_number + 1))
-    if epoch % 20 == 0:
+    if epoch % 1 == 0:
         print(f"creating epoch {epoch} dataset")
         dataset = INRPointsDataset(create_dataset())
 

@@ -482,8 +482,10 @@ def autograd_proxy(output, input_tensor):
 def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100, device='cpu'):
     points = []
     R, t = compute_laser_transformation(laser_center, laser_norm)
-    x = torch.linspace(-20, 20, 50, device='cpu')
-    y = torch.linspace(-60, 60, 100, device='cpu')
+    offset_x = random.uniform(0, 0.5 / 100)
+    offset_y = random.uniform(0, 0.5 / 100)
+    x = torch.linspace(-0.5, 0.5, 100, device='cpu') + offset_x
+    y = torch.linspace(-0.5, 0.5, 100, device='cpu') + offset_y
     z = 0
 
     grid_points = []
@@ -508,7 +510,7 @@ def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100, dev
 
     dbg = False
     if dbg:
-        output = output.view(50, 100)
+        output = output.view(100, 100)
         output = output.detach().cpu().numpy()
         plane = output
         fig = plt.figure()
@@ -516,7 +518,7 @@ def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100, dev
         # plt.show(block=True)
         plt.show(block=False)
 
-        plane = gradient_image.view(50, 100)
+        plane = gradient_image.view(100, 100)
         fig = plt.figure()
         plt.imshow(plane)
         # plt.show(block=True)
@@ -550,8 +552,7 @@ def sample_point_from_plane_gradient(laser_center, laser_norm, model, k=100, dev
         points.append(grid_points_clone.view(50, 100, 3)[x, y].cpu().numpy())
     '''
 
-    points = gibbs.gibbs_sampling_2d(gradient_image.view(50, 100).numpy(), k, [0, 0, 0],
-                                     grid_points_clone)
+    points = gibbs.gibbs_sampling_2d(gradient_image.view(100, 100).numpy(), k, [0, 0, 0], grid_points_clone)
 
     return torch.from_numpy(points), grid_points_clone
 
@@ -564,8 +565,8 @@ def abs_model_evaluation(model: INR3D, points: np.ndarray):
 
 
 def find_optimal_point_parallel(model, vertexes, normals, epsilon=1e-5, max_iter=100, dbg=False):
-    a = np.full(len(vertexes), -0.2, dtype=np.float32)
-    b = np.full(len(vertexes), 0.2, dtype=np.float32)
+    a = np.full(len(vertexes), -0.002, dtype=np.float32)
+    b = np.full(len(vertexes), 0.002, dtype=np.float32)
     num_points = len(vertexes)
 
     optimal_points = [[vertexes[i], 1] for i in range(len(vertexes))]
@@ -640,11 +641,12 @@ def mae_model_evaluation(model: INR3D, points: np.ndarray, normals: np.ndarray):
     return sum(abs_values) / len(points), sum([1 for o in optimal_points if o[1] == 0]) / len(points)
 
 
-def rmse_model_evaluation(model: INR3D, points: np.ndarray, normals: np.ndarray, dbg=False):
+def rmse_model_evaluation(model: INR3D, points: np.ndarray, normals: np.ndarray, dbg=False, camera_position=None,
+                          epsilon=0.0001):
     squares = []
     optimal_points = find_optimal_point_parallel(model, points,
                                                  normals,
-                                                 epsilon=0.0001,
+                                                 epsilon=epsilon,
                                                  max_iter=30,
                                                  dbg=False)
     print("converged on mesh: ", sum([1 for o in optimal_points if o[1] == 0]), len(points))
@@ -672,15 +674,249 @@ def rmse_model_evaluation(model: INR3D, points: np.ndarray, normals: np.ndarray,
     '''
 
     if dbg:
-        point_cloud = pv.PolyData(points)
-        point_cloud['errors'] = [min(e, 2.) for e in errors]
+        points @= rotate_z(180)
+        points @= rotate_x(-90)
+        points @= rotate_z(180)
+
         cmap = plt.cm.plasma
         cmap.set_bad(color='green')
+
+        point_cloud = pv.PolyData(points)
+        point_cloud['errors'] = [min(e, 2.) for e in errors]
+
         plotter = pv.Plotter()
         plotter.add_mesh(point_cloud, scalars='errors', cmap=cmap, nan_color='green', point_size=10)
         # plotter.add_scalar_bar(title='Error Value', n_labels=5)
 
+        if camera_position is not None:
+            plotter.camera_position = camera_position
+        else:
+            plotter.view_isometric()
+        '''
+        plotter.view_isometric()
+        camera_position = plotter.camera_position
+        camera_location, camera_focus, view_up = camera_position
+        lowered_camera_location = (camera_location[0] + 50, camera_location[1], camera_location[2] - 100)
+        plotter.camera_position = (lowered_camera_location, camera_focus, view_up)
+        '''
+        # plotter.show_axes()
+        # plotter.show_grid()
+        # plotter.save_graphic('test.svg', title='PyVista Export', raster=True, painter=True)
+        # plotter.show(interactive_update=True)
         plotter.show()
+        plotter.screenshot('test.png', False)
 
     return math.sqrt(sum(squares) / len(points)), np.array(errors), \
         sum([1 for o in optimal_points if o[1] == 0]) / len(points)
+
+
+def evaluate_point_classification(mesh: pv.PolyData, externals, internals):
+    correct = 0
+    wrong = 0
+
+    point_cloud = pv.PolyData(externals)
+    enclosed = point_cloud.select_enclosed_points(mesh, check_surface=False)
+    inside_mask = enclosed['SelectedPoints'].view(np.bool_)
+
+    for point, is_in in zip(externals, inside_mask):
+        if not is_in:
+            correct += 1
+        else:
+            wrong += 1
+
+    point_cloud = pv.PolyData(internals)
+    enclosed = point_cloud.select_enclosed_points(mesh)
+    inside_mask = enclosed['SelectedPoints'].view(np.bool_)
+    for point, is_in in zip(internals, inside_mask):
+        if is_in:
+            correct += 1
+        else:
+            wrong += 1
+
+    print(f"Mesh evaluation: {round((correct / (correct + wrong)) * 100, 2)}")
+    return correct, wrong
+
+
+def laser_ray_sampling2(image, laser_points):
+    points = []
+    degree = int(image.split('_')[1])
+    side = image.split('_')[2]
+
+    K = renders_matrices[image]['K']
+    R = renders_matrices[image]['R']
+    t = renders_matrices[image]['t']
+    laser_center = renders_matrices[image]['laser_center']
+    laser_norm = renders_matrices[image]['laser_norm']
+
+    a, b, c = laser_norm
+    d = -(a * laser_center[0] + b * laser_center[1] + c * laser_center[2])
+
+    render = cv.imread(os.path.join(image_folder, image), cv.IMREAD_UNCHANGED)[:, :, 0:3]
+    red_channel = render[:, :, 2] * 255
+    _, red_channel = cv.threshold(red_channel, 100, 255, cv.THRESH_BINARY)
+
+    camera_position = np.squeeze(np.asarray(- np.matrix(R).T @ t))
+    point_cloud_e = []
+    point_cloud_u = []
+
+    laser_pixels = {}
+    for pixel in np.column_stack(np.where(red_channel > 0)):
+        laser_pixels.setdefault(pixel[0], [])
+        laser_pixels[pixel[0]].append(pixel[1])
+
+    foo = []
+    for k, v in laser_pixels.items():
+        if side == 'right':
+            foo.append([k, v[-1]])
+        elif side == 'left':
+            foo.append([k, v[0]])
+
+    lines = []
+
+    p_laser_center = project_point([laser_center[0], laser_center[1], laser_center[2]], R, t, K)
+    p_laser_center = np.array(p_laser_center)
+    external = np.empty((0, 3))
+    unknown = np.empty((0, 3))
+
+    # newpoints = newpoints[np.random.choice(newpoints.shape[0], replace=False, size=1000)]
+
+    flag = True
+    for [u, v] in foo:
+        laser_point_camera = np.array(
+            [v - (red_channel.shape[1] / 2), u - (red_channel.shape[0] / 2), K[0][0], 1])
+        laser_point_world = np.concatenate([
+            np.concatenate([R.T, np.array(- R.T @ t).reshape(3, 1)], axis=1),
+            np.array([[0, 0, 0, 1]])
+        ], axis=0) @ laser_point_camera
+
+        laser_point_world = [laser_point_world[0] / laser_point_world[3],
+                             laser_point_world[1] / laser_point_world[3],
+                             laser_point_world[2] / laser_point_world[3]]
+
+        world_point = np.squeeze(
+            np.asarray(find_plane_line_intersection([a, b, c, d], camera_position, np.array(laser_point_world)))
+        )
+
+        points.append([world_point, -1])
+
+        #######
+
+        external = np.concatenate([external, sample_points_on_segment(torch.from_numpy(world_point),
+                                                                      torch.from_numpy(laser_center))])
+
+        '''
+        unknown = np.concatenate([unknown,
+                                  sample_points_on_segment(torch.from_numpy(world_point),
+                                                           torch.from_numpy(
+                                                               world_point + 2 * (world_point - laser_center)
+                                                           ),
+                                                           lam=50, N=laser_points).numpy()])
+                                                                      lam=50, N=laser_points).numpy()])
+        '''
+
+        '''
+        line_points = [line_point for line_point in
+                       bresenham(v, u, p_laser_center[0], p_laser_center[1])]
+        if side == 'right':
+            line_points.reverse()
+        lines.append(line_points)
+        '''
+        #######
+    if flag:
+        return unknown, external
+
+    '''
+    '''
+
+    if debug:
+        pl = pv.Plotter()
+        pl.add_mesh(mesh)
+        pl.add_points(external, color='green')
+        pl.add_points(np.array([p[0] for p in points]), color='orange')
+        pl.show()
+
+        render = np.array(render)
+        for p in points:
+            cv.drawMarker(render, project_point(p[0].tolist(), R, t, K), [0, 255, 0], cv.MARKER_TILTED_CROSS, 1, 1)
+
+        for line in lines:
+            for p in line:
+                cv.drawMarker(render, list(p), [0, 255, 0], cv.MARKER_TILTED_CROSS, 1, 1)
+
+        cv.imshow('foobar', render)
+        cv.waitKey(0)
+    '''
+    '''
+
+    p_laser_center = project_point([laser_center[0], laser_center[1], laser_center[2]], R, t, K)
+    p_laser_center = np.array(p_laser_center)
+    points = sample_points_from_plane([0, 0, 0], laser_norm, laser_points).T
+    projected_points_camera = project_points(points, R, t, K)
+    dataset = []
+
+    projected_points_camera = np.asarray(projected_points_camera)
+    points = np.asarray(points)
+    for index in range(points.shape[0]):
+        original_point = points[index]
+        p = projected_points_camera[index]
+
+        '''
+        direction = -laser_center[1] / (y - laser_center[1])
+        far_point = (
+            laser_center[0] + direction * (x - laser_center[0]), 0, laser_center[2] + direction * (z - laser_center[2]))
+
+        p_far_point = np.array([far_point[0], far_point[1], far_point[2], 1.])
+        p_far_point = K @ np.concatenate([R, np.matrix(t).T], axis=1) @ p_far_point
+        p_far_point = [int(round(p_far_point[0, 0] / p_far_point[0, 2])),
+                       int(round(p_far_point[0, 1] / p_far_point[0, 2]))]
+        '''
+
+        p_far_point = [int(round(i)) for i in p_laser_center + 2 * (p - p_laser_center)]
+
+        line_points = [line_point for line_point in bresenham(p_far_point[0], p_far_point[1], p[0], p[1])]
+        if side == 'right':
+            line_points.reverse()
+
+        unknown = True
+        for point in line_points:
+            if 0 < point[1] < 1024 and 0 < point[0] < 1024:
+                render[point[1], point[0], 1] = 255
+
+            if 0 < point[1] < 1024 and 0 < point[0] < 1024 and red_channel[point[1], point[0]] > 200:
+                unknown = False
+                break
+
+        '''
+        if not unknown:
+            for point in line_points:
+                if 0 < point[1] < 256 and 0 < point[0] < 256:
+                    render[point[1], point[0]] = [0, 255, 0]
+                    if red_channel[point[1], point[0]] > 200:
+                        break
+
+        '''
+        if debug:
+            render = np.array(render)
+            cv.drawMarker(render, p_far_point, [255, 255, 0], cv.MARKER_DIAMOND, 2, 1)
+            cv.drawMarker(render, p, [255, 0, 0], cv.MARKER_CROSS, 2, 2)
+            cv.imshow('red', red_channel)
+            cv.imshow('foobar', render)
+            cv.waitKey(1)
+
+        if unknown:
+            dataset.append([original_point, 0])
+            point_cloud_u.append(original_point)
+        else:
+            dataset.append([original_point, 1])
+            point_cloud_e.append(original_point)
+
+    if debug:
+        pl = pv.Plotter()
+        pl.add_mesh(mesh)
+        # pl.add_points(pv.PolyData(np.array(point_cloud_u)), color='red')
+        pl.add_points(pv.PolyData(np.array(point_cloud_e)), color='green')
+        pl.enable_eye_dome_lighting()
+        pl.show_grid()
+        pl.show()
+
+    return dataset

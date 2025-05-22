@@ -31,7 +31,7 @@ def gibbs_sampling_2d(distribution, num_samples, initial_point, values):
     samples = np.random.choice(len(distribution), p=distribution, size=num_samples)
     samples = [np.unravel_index(s, original_distr.shape) for s in samples]
 
-    values = values.detach().cpu().view(50, 100, 3).numpy()
+    values = values.detach().cpu().view(100, 100, 3).numpy()
     return np.array([values[s[0], s[1]] for s in samples])
 
 
@@ -72,5 +72,5 @@ def gibbs_sampling_3d(distribution, num_samples, initial_point, values):
     samples = np.random.choice(len(distribution), p=distribution, size=num_samples)
     samples = [np.unravel_index(s, original_distr.shape) for s in samples]
 
-    values = values.detach().view(100, 50, 100, 3).numpy()
+    values = values.detach().cpu().view(100, 100, 100, 3).numpy()
     return np.array([values[s[0], s[1], s[2]] for s in samples])

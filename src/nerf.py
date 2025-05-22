@@ -9,9 +9,9 @@ import vortex as vx
 from src.dataset import load_renders
 from src.evaluation import metrics
 
-gt_mesh = pv.read('scenes/meshes/Dragon-small.ply')
+gt_mesh = pv.read('scenes/meshes/bunny-small.ply')
 
-dragon = pv.read('/Users/mario/Desktop/dragon.ply')
+dragon = pv.read('/Users/mario/Desktop/bunny.ply')
 dragon = dragon.rotate_x(90)
 gt_mesh = gt_mesh.rotate_x(90)
 gt_mesh = gt_mesh.rotate_y(-90)
@@ -86,7 +86,7 @@ pl.add_points(np.array([p['mitsuba'] for p in poses.values()]))
 
 dragon.points = rt.apply(dragon.points)
 
-# dragon = dragon.scale(0.5) fixme
+dragon = dragon.scale(0.5)  # fixme
 pl.add_mesh(dragon)
 pl.add_mesh(gt_mesh)
 
@@ -109,7 +109,7 @@ pl.show()
 
 dragon.points = rt.apply(dragon.points)
 
-# dragon = dragon.scale(0.5) fixme
+# dragon = dragon.scale(0.5)
 pl.add_mesh(dragon)
 pl.add_mesh(gt_mesh)
 

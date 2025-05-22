@@ -1,17 +1,17 @@
-import copy
 import os
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pyvista
 import pyvista as pv
 import torch
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+import trimesh
 from skimage import measure
 
 import utils
 from dataset import load_renders
 from inr_model import INR3D
+from src.evaluation import metrics
+from src.utils import rotate_z
 
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
@@ -35,8 +35,9 @@ def silhouette_sampling(point):
 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-target = 'Dragon'
+target = 'bunny-small'
+mode = 'uniform'
+post_process = False
 torch.manual_seed(41)
 model = INR3D()
 
@@ -44,45 +45,53 @@ image_folder = f'renders/{target}'
 images = [img for img in os.listdir(image_folder) if img.endswith(".exr")]
 images.sort(key=lambda name: int(name.split('_')[1]))
 renders_matrices = load_renders(images, target)
-
-loss_fn = torch.nn.MSELoss()
+loss_fn = torch.nn.BCELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-model.load_state_dict(torch.load('3d-model-Dragon-grad', map_location=device))
+model.load_state_dict(
+    torch.load('models/20250506_041016_bunny-small_gradient/3d-model-bunny-small-60',
+               map_location=device))
 
-'''
-with open('history-uniform.txt', 'r') as f:
-    history_uniform = []
-    for line in f.readlines():
-        history_uniform.append(float(line.strip().split()[0]))
-
-with open('history-gradient.txt', 'r') as f:
-    history_gradient = []
-    for line in f.readlines():
-        history_gradient.append(float(line.strip().split()[0]))
-
-plt.plot(history_uniform, label='uniform')
-plt.plot(history_gradient, label='gradient')
-plt.legend()
-plt.xlabel("Iterations")
-plt.ylabel("Root Mean Square Error")
-plt.show()
-'''
-
-x = torch.linspace(-40, 40, 200)
-y = torch.linspace(-40, 0, 100)
-z = torch.linspace(-40, 40, 200)
+x = torch.linspace(-0.5, 0.5, 100)
+y = torch.linspace(-0.5, 0.5, 100)
+z = torch.linspace(-0.5, 0.5, 100)
 X, Y, Z = torch.meshgrid(x, y, z)
-
 points = torch.stack((X.flatten(), Y.flatten(), Z.flatten()), dim=-1)
 
 with torch.no_grad():
-    densities = np.array(model(points).reshape(200, 100, 200))
+    '''
+    densities = np.empty((0, 1))
+    for chunk in points.chunk(1000):
+        print(np.array(model(chunk)).shape)
+        densities = np.concatenate([densities,
+                                    np.array(model(chunk))])  # np.array(model(points))  # .reshape(100, 50, 100))
+    '''
+    densities = np.array(model(points))
 
 print(points.shape)
-grid = points.reshape(200, 100, 200, 3)
+grid = points.reshape(100, 100, 100, 3)
 print(grid.shape)
+
 '''
-densities = [densities[i] if (silhouette_sampling(grid[i] / 10)) == -1 else 1 for i in range(len(grid))]
+'''
+
+# PostProcessing routine
+'''
+
+def just_tell_me_where_are_you(i):
+    print(f"{i * 100 / len(points)}", end='\r')
+    return True
+
+'''
+'''
+'''
+if post_process:
+    densities = [1 if densities[i] < 0 and (silhouette_sampling(points[i] / 10)) == 1 else densities[i][0] for i in
+                 range(len(points))]
+
+densities = np.array(densities)
+densities = densities.reshape(100, 100, 100)
+
+'''
 for i in range(200):
     for j in range(100):
         for k in range(200):
@@ -90,106 +99,155 @@ for i in range(200):
                 densities[i, j, k] = 1
     print(f"row: {i} done")
 '''
+'''
+'''
+#
 
-densities = densities.reshape(200, 100, 200)
+'''
 plane = densities[:, :, 100]
 fig = plt.figure()
 plt.imshow(plane)
 plt.show(block=True)
+'''
 
 vertices, faces, normals, values = measure.marching_cubes(densities, allow_degenerate=False, level=0)
+vertices = vertices * ((np.array([0.5, 0.5, 0.5]) - np.array([-0.5, -0.5, -0.5])) / densities.shape) + np.array(
+    [-0.5, -0.5, -0.5])
 
-vertices = vertices * ((np.array([40, 0, 40]) - np.array([-40, -40, -40])) / densities.shape) + np.array(
-    [-40, -40, -40])
-
+'''
 old_vertices = copy.deepcopy(vertices)
 point_cloud = pv.PolyData(vertices)
 point_cloud.plot(eye_dome_lighting=True, show_axes=True, show_grid=True)
+'''
 
 mesh = pyvista.read(f'scenes/meshes/{target}.ply')
 mesh.compute_normals(inplace=True)
-mesh = mesh.rotate_z(180)
-mesh = mesh.rotate_x(90)
-mesh = mesh.scale(10)
+# mesh = mesh.rotate_z(180)
+# mesh = mesh.rotate_x(90)
+# mesh = mesh.scale(10)
 # print([model(torch.tensor([p])) for p in mesh.points])
 # mesh = mesh.translate()
 p1 = pv.Plotter()
-p1.add_points(mesh, color='tan')
-p1.add_points(pv.PolyData(old_vertices))
+# p1.add_points(mesh, color='tan')
+# p1.add_points(pv.PolyData(vertices))
+optimal_points = utils.find_optimal_point_parallel(model, vertices, normals, 0.0001,
+                                                   30, False)
+print(sum([o[0] for o in optimal_points]), len(optimal_points))
+
+# rmse_error = utils.rmse_model_evaluation(model, mesh.points, mesh.active_normals, False, camera_position,
+#                                         epsilon=0.0001)
+# print(f"RMSE: {rmse_error[0]}")
+
+optimal_points = [o[0] if o[1] == 0 else vertices[i] for i, o in enumerate(optimal_points)]
+
+vertices = np.array(optimal_points)
+pv_faces = []
+
+for face in faces:
+    complete_face = face.tolist()
+    complete_face.insert(0, len(face))
+    pv_faces.append(complete_face)
+
+surf = pv.PolyData(vertices, np.hstack([pv_faces]))
+p1.add_mesh(surf)
 # p1.add_points(pv.PolyData(points.detach().numpy()), color='red')
-p1.add_arrows(mesh.points, mesh.active_normals, color='black')
+# p1.add_arrows(mesh.points, mesh.active_normals, color='black')
 p1.add_axes()
 p1.show_grid()
 p1.show()
 
+'''
 abs_error = utils.abs_model_evaluation(model, mesh.points)
 print(f"ABS: {abs_error}")
 mae_error = utils.mae_model_evaluation(model, mesh.points, mesh.active_normals)
 print(f"MAE: {mae_error[0]}")
+'''
 
-mesh_points_indexes = [i for i in range(len(mesh.points)) if mesh.points[i][1] < -1]
+mesh_points_indexes = [i for i in range(len(mesh.points)) if True]  # mesh.points[i][1] < -1]
 
+### Camera position
+
+'''
+camera_position = [(100., 100., 55),
+                   (-0.05642535239457658, -0.3681839525699573, 20.08591179996729),
+                   (0.0, 0.0, 1.0)]
+'''
+
+###
+
+'''
 rmse_error = utils.rmse_model_evaluation(model, mesh.points[mesh_points_indexes],
-                                         mesh.active_normals[mesh_points_indexes], True)
+                                         mesh.active_normals[mesh_points_indexes], True, camera_position)
 print(f"RMSE: {rmse_error[0]}")
+'''
 
 # optimal_points = [utils.find_optimal_point(model, vertices[i], normals[i], epsilon=0.001) for i in range(len(vertices))]
 optimal_points = utils.find_optimal_point_parallel(model, vertices, normals, 0.0001, 30, False)
 print(sum([o[1] for o in optimal_points]), len(mesh_points_indexes))
+
 optimal_points = [o[0] if o[1] == 0 else vertices[i] for i, o in enumerate(optimal_points)]
-'''
-for _ in range(100):
-    nd_vertices = np.array(vertices)
+# optimal_points = [o[0] if o[1] == 0 else mesh.points[i] for i, o in enumerate(optimal_points)]
 
-    with torch.no_grad():
-        positive = [v + (coeff * normals[i]) for i, v in enumerate(nd_vertices)]
-        negative = [v + (-coeff * normals[i]) for i, v in enumerate(nd_vertices)]
-        pos_densities = model(torch.tensor(positive, dtype=torch.float32))
-        densities = model(torch.tensor(nd_vertices, dtype=torch.float32))
-        neg_densities = model(torch.tensor(negative, dtype=torch.float32))
-        updated_vertices = []
-        for i, vertice in enumerate(vertices):
-            if abs(densities[i]) < epsilon:
-                updated_vertices.append(vertice)
-            elif math.copysign(1, neg_densities[i]) == math.copysign(1, densities[i]):
-                updated_vertices.append((positive[i] + vertice) / 2)
-            else:
-                updated_vertices.append((negative[i] + vertice) / 2)
+# point_cloud = pv.PolyData(optimal_points)
+# point_cloud.plot(eye_dome_lighting=True, border_color='green')
 
-        vertices = updated_vertices
-        coeff /= 2
-'''
-point_cloud = pv.PolyData(optimal_points)
-point_cloud.plot(eye_dome_lighting=True, border_color='green')
-
-# vertices = [v.tolist() for v in vertices]
-# vertices = np.array(vertices)
 vertices = np.array(optimal_points)
+# vertices = np.array(vertices)
 
-cloud = pv.PolyData(vertices)
-cloud.plot()
+# cloud = pv.PolyData(vertices)
+# cloud.plot()
 
-volume = cloud.delaunay_3d(alpha=1)  # , progress_bar=True)  #
-shell = volume.extract_geometry()
-shell.plot(eye_dome_lighting=True, show_axes=True)
+pv_faces = []
 
-fig = plt.figure(figsize=(10, 10))
-ax = fig.add_subplot(111, projection='3d')
+for face in faces:
+    complete_face = face.tolist()
+    complete_face.insert(0, len(face))
+    pv_faces.append(complete_face)
 
-vertices @= utils.rotate_y(-180)
-vertices @= utils.rotate_x(-90)
-# mesh = Poly3DCollection(old_vertices[faces])
-mesh = Poly3DCollection(np.array([[vertices[f] for f in face] for face in faces]))
-mesh.set_edgecolor('k')
-ax.add_collection3d(mesh)
+surf = pv.PolyData(vertices, np.hstack([pv_faces]))
+surf.save(f'models/output-meshes/{target}/{mode}-smooth.ply')
 
-ax.set_xlabel("x-axis")
-ax.set_ylabel("y-axis")
-ax.set_zlabel("z-axis")
+plotter = pv.Plotter()
+plotter.add_mesh(surf, show_edges=False, color='lightblue')
+'''
+plotter.view_isometric()
+camera_position = plotter.camera_position
+camera_location, camera_focus, view_up = camera_position
+lowered_camera_location = (camera_location[0] + 50, camera_location[1], camera_location[2] - 100)
+plotter.camera_position = (lowered_camera_location, camera_focus, view_up)
+print(plotter.camera_position)
+'''
+# plotter.camera_position = camera_position
+plotter.show_axes()
+# plotter.show_grid()
+# plotter.enable_eye_dome_lighting()
 
-ax.set_xlim(-100, 100)
-ax.set_ylim(-100, 100)
-ax.set_zlim(-100, 100)
+plotter.show()
+plotter.screenshot('test2.png', False)
+# plotter.save_graphic('test2.svg', title='PyVista Export', raster=True, painter=True)
 
-plt.tight_layout()
-plt.show()
+
+vertices = surf.points
+faces = surf.faces.reshape((-1, 4))[:, 1:]
+
+num_points = 100000
+points, _ = trimesh.sample.sample_surface(
+    trimesh.Trimesh(vertices=vertices, faces=faces)
+    , num_points)
+
+gt_points, _ = trimesh.sample.sample_surface(
+    trimesh.load(f'scenes/meshes/{target}.ply')
+    , num_points)
+
+gt_points @= rotate_z(180)
+
+pl = pv.Plotter()
+pl.add_points(points)
+pl.add_points(gt_points, color='orange')
+pl.show_grid()
+pl.show_axes()
+pl.enable_eye_dome_lighting()
+pl.show()
+
+print(metrics.chamfer_distance(points, gt_points))
+print(metrics.hausdorff_distance(points, gt_points))
